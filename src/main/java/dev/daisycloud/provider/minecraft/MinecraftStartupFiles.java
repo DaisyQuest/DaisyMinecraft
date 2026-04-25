@@ -24,6 +24,7 @@ public record MinecraftStartupFiles(Map<String, String> files) {
         files.put("server.properties", serverProperties(planned));
         files.put("content-lock.json", contentLock(planned));
         files.put("daisycloud-runtime.properties", runtimeProperties(planned));
+        files.putAll(MinecraftBundledAddons.startupFiles(planned));
         return new MinecraftStartupFiles(files);
     }
 
@@ -93,6 +94,17 @@ public record MinecraftStartupFiles(Map<String, String> files) {
         properties.put("activeInstance", value(planned, "activeInstance"));
         properties.put("maxInstances", value(planned, "maxInstances"));
         properties.put("instanceSwitchPolicy", value(planned, "instanceSwitchPolicy"));
+        properties.put("bundledAddonSchema", value(planned, "bundledAddonSchema"));
+        properties.put("bundledAddonIds", value(planned, "bundledAddonIds"));
+        properties.put("bundledPlugins", value(planned, "bundledPlugins"));
+        properties.put("bundledAddonPlan", value(planned, "bundledAddonPlan"));
+        properties.put("daisyCompanion", value(planned, "daisyCompanion"));
+        properties.put("daisyCompanionPluginPath", value(planned, "daisyCompanionPluginPath"));
+        properties.put("daisyCompanionConfigPath", value(planned, "daisyCompanionConfigPath"));
+        properties.put("daisyCompanionSha256", value(planned, "daisyCompanionSha256"));
+        properties.put("daisyCompanionDogName", value(planned, "daisyCompanionDogName"));
+        properties.put("daisyCompanionHealthMultiplier", value(planned, "daisyCompanionHealthMultiplier"));
+        properties.put("daisyCompanionScaleMultiplier", value(planned, "daisyCompanionScaleMultiplier"));
         return propertiesFile(properties);
     }
 

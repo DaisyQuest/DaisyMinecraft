@@ -82,6 +82,15 @@ class MinecraftServerProviderTest {
         assertTrue(response.value().get("marketplaceInstallPlan").contains("malware-scan"));
         assertTrue(response.value().get("marketplaceDependencyStrategy").contains("transitive"));
         assertEquals("required", response.value().get("marketplaceMalwareScan"));
+        assertEquals("daisyminecraft.bundled-addons.v1", response.value().get("bundledAddonSchema"));
+        assertEquals("enabled", response.value().get("daisyCompanion"));
+        assertEquals("1", response.value().get("bundledAddonCount"));
+        assertEquals("daisyminecraft:daisy-companion", response.value().get("bundledAddonIds"));
+        assertEquals("Daisy", response.value().get("daisyCompanionDogName"));
+        assertEquals("100.0", response.value().get("daisyCompanionHealthMultiplier"));
+        assertEquals("2.0", response.value().get("daisyCompanionScaleMultiplier"));
+        assertEquals("plugins/DaisyCompanion.jar", response.value().get("daisyCompanionPluginPath"));
+        assertTrue(response.value().get("daisyCompanionSha256").matches("[a-f0-9]{64}"));
         assertEquals("daisyminecraft.instances.v1", response.value().get("instanceManagerSchema"));
         assertEquals("enabled", response.value().get("instanceManagerState"));
         assertEquals("primary", response.value().get("activeInstance"));
@@ -94,6 +103,7 @@ class MinecraftServerProviderTest {
         assertTrue(response.value().get("deploymentEvidence").contains("Mod selection locked"));
         assertTrue(response.value().get("deploymentEvidence").contains("DaisyBase control plane planned"));
         assertTrue(response.value().get("deploymentEvidence").contains("Marketplace profile captured"));
+        assertTrue(response.value().get("deploymentEvidence").contains("Bundled companion plugin planned"));
         assertTrue(response.value().get("deploymentEvidence").contains("Instance manager captured"));
         assertTrue(response.value().get("deploymentEvidence").contains("Startup files rendered"));
     }
@@ -116,6 +126,8 @@ class MinecraftServerProviderTest {
         assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_DATABASE_MODE=managed"));
         assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_MARKETPLACE_MODE=hybrid"));
         assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_ACTIVE_INSTANCE=primary"));
+        assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_DAISY_COMPANION=enabled"));
+        assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_BUNDLED_ADDONS=daisyminecraft:daisy-companion"));
         assertTrue(response.value().get("containerPortBindings").contains("25565/tcp=25565"));
         assertTrue(response.value().get("containerVolumes").contains("daisycloud-mc-survival-core=/data"));
         assertTrue(response.value().get("containerResourceLimits").contains("memoryMb=2048"));
@@ -132,6 +144,7 @@ class MinecraftServerProviderTest {
         assertTrue(response.value().get("nodeAgentExecutionPlan").contains("resolve-marketplace-content:hybrid"));
         assertTrue(response.value().get("nodeAgentExecutionPlan").contains("activate-instance:primary"));
         assertTrue(response.value().get("nodeAgentExecutionPlan").contains("write-startup-files:"));
+        assertTrue(response.value().get("nodeAgentExecutionPlan").contains("install-bundled-addons:install:daisyminecraft:daisy-companion"));
         assertTrue(response.value().get("nodeAgentEvidence").contains("marketplaceMode=hybrid"));
         assertTrue(response.value().get("nodeAgentEvidence").contains("adminPanelUxSchema=daisyminecraft.admin-ux.v1"));
         assertTrue(response.value().get("nodeAgentStartupFileDigests").contains("server.properties="));
@@ -140,12 +153,17 @@ class MinecraftServerProviderTest {
         assertTrue(response.value().get("startupFile:server.properties").contains("online-mode=true"));
         assertTrue(response.value().get("startupFile:eula.txt").contains("eula=true"));
         assertTrue(response.value().get("startupFile:content-lock.json").contains("\"kind\":\"plugin\""));
+        assertTrue(response.value().get("startupFile:plugins/DaisyCompanion/config.yml").contains("dog-name: Daisy"));
+        assertTrue(response.value().get("startupFile:plugins/DaisyCompanion/config.yml").contains("health-multiplier: 100.0"));
+        assertTrue(response.value().get("startupFile:plugins/DaisyCompanion/config.yml").contains("scale-multiplier: 2.0"));
+        assertTrue(response.value().get("startupFile:daisyminecraft-bundled-addons.json").contains("\"id\": \"daisyminecraft:daisy-companion\""));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("backupPolicySchema="));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("adminPanelSecurityPolicy="));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("networkFirewallRules="));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("databaseSchemaVersion=daisyminecraft.database.v1"));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("marketplaceInstallPlan="));
         assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("instanceManagerSchema=daisyminecraft.instances.v1"));
+        assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("daisyCompanion=enabled"));
         assertTrue(response.value().get("startupFile:content-lock.json").contains("\"id\":\"luckperms\""));
         assertTrue(response.value().get("startupFile:content-lock.json").contains("\"id\":\"geyser\""));
     }
@@ -243,11 +261,14 @@ class MinecraftServerProviderTest {
         assertEquals("succeeded", result.attributes().get("nodeAgentStatus"));
         assertEquals("healthy", result.attributes().get("healthState"));
         assertTrue(result.attributes().get("runtimeAppliedSteps").contains("prepare-daisybase=bootstrapped:9"));
+        assertTrue(result.attributes().get("runtimeAppliedSteps").contains("install-bundled-addons=daisyminecraft:daisy-companion"));
         assertTrue(result.attributes().get("runtimeAppliedSteps").contains("start-container=mc-runtime-node"));
         assertEquals("mc-runtime-node", driver.startedSpec.serviceName());
         assertEquals("primary", driver.startedSpec.activeInstance());
         assertTrue(driver.operations.contains("pull:daisycloud/minecraft-paper:1.21.11"));
         assertTrue(driver.operations.contains("write:mc-runtime-node:server.properties"));
+        assertTrue(driver.operations.stream()
+                .anyMatch(operation -> operation.startsWith("write-binary:mc-runtime-node:plugins/DaisyCompanion.jar:")));
         assertTrue(driver.operations.contains("bind:mc-runtime-node:25565/tcp=25565"));
         assertTrue(resources.get(response.value().get("databaseResourceId"))
                 .orElseThrow()
@@ -594,6 +615,33 @@ class MinecraftServerProviderTest {
     }
 
     @Test
+    void defaultsDaisyCompanionOffForNonPluginServerTypes() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().plan(context(Map.of(
+                "serverName", "fabric-hub",
+                "minecraftVersion", "1.21.11",
+                "serverType", "fabric",
+                "eulaAccepted", "true")));
+
+        assertTrue(response.success(), response.message());
+        assertEquals("disabled", response.value().get("daisyCompanion"));
+        assertEquals("0", response.value().get("bundledAddonCount"));
+        assertEquals("disabled", response.value().get("bundledAddonPlan"));
+    }
+
+    @Test
+    void rejectsDaisyCompanionOnNonPluginServerTypesWhenExplicitlyEnabled() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().validate(context(Map.of(
+                "serverName", "fabric-daisy",
+                "minecraftVersion", "1.21.11",
+                "serverType", "fabric",
+                "eulaAccepted", "true",
+                "daisyCompanion", "enabled")));
+
+        assertFalse(response.success());
+        assertEquals("daisyCompanion=enabled requires serverType paper, spigot, or purpur", response.message());
+    }
+
+    @Test
     void rejectsPublicAdminPanelWithoutTwoFactor() {
         ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().validate(context(Map.of(
                 "serverName", "unsafe-panel",
@@ -769,6 +817,11 @@ class MinecraftServerProviderTest {
         @Override
         public void writeStartupFile(String serviceName, String fileName, String content) {
             operations.add("write:" + serviceName + ":" + fileName);
+        }
+
+        @Override
+        public void writeBinaryFile(String serviceName, String fileName, byte[] content) {
+            operations.add("write-binary:" + serviceName + ":" + fileName + ":" + content.length);
         }
 
         @Override

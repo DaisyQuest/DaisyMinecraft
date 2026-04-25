@@ -61,6 +61,8 @@ public record MinecraftContainerManifest(
         environment.put("DAISY_MINECRAFT_MARKETPLACE_SOURCES", requirePlanned(planned, "marketplaceSources"));
         environment.put("DAISY_MINECRAFT_ACTIVE_INSTANCE", requirePlanned(planned, "activeInstance"));
         environment.put("DAISY_MINECRAFT_INSTANCE_MANAGER", requirePlanned(planned, "instanceManagerState"));
+        environment.put("DAISY_MINECRAFT_BUNDLED_ADDONS", planned.getOrDefault("bundledAddonIds", ""));
+        environment.put("DAISY_MINECRAFT_DAISY_COMPANION", requirePlanned(planned, "daisyCompanion"));
 
         Map<String, String> ports = new LinkedHashMap<>();
         ports.put(port + "/tcp", port);
@@ -95,6 +97,8 @@ public record MinecraftContainerManifest(
         labels.put("dev.daisycloud.databaseMode", requirePlanned(planned, "databaseMode"));
         labels.put("dev.daisycloud.marketplaceMode", requirePlanned(planned, "marketplaceMode"));
         labels.put("dev.daisycloud.activeInstance", requirePlanned(planned, "activeInstance"));
+        labels.put("dev.daisycloud.bundledAddons", planned.getOrDefault("bundledAddonIds", ""));
+        labels.put("dev.daisycloud.daisyCompanion", requirePlanned(planned, "daisyCompanion"));
 
         return new MinecraftContainerManifest(
                 "daisyminecraft.container.v1",

@@ -1,0 +1,6 @@
+dog-name: Daisy
+health-multiplier: 100.0
+scale-multiplier: 2.0
+spawn-delay-ticks: 20
+only-first-join: true
+collar-color: YELLOW

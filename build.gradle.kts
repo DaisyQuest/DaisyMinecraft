@@ -1,5 +1,7 @@
 import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.tasks.Jar
 
 plugins {
     `java-library`
@@ -16,6 +18,22 @@ java {
     withSourcesJar()
 }
 
+evaluationDependsOn(":daisy-companion-plugin")
+
+val copyBundledAddons = tasks.register<Copy>("copyBundledAddons") {
+    val companionJar = project(":daisy-companion-plugin").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+    dependsOn(":daisy-companion-plugin:jar")
+    from(companionJar)
+    into(layout.buildDirectory.dir("generated-resources/bundled-addons/daisyminecraft/bundled-plugins"))
+    rename { "DaisyCompanion.jar" }
+}
+
+sourceSets {
+    main {
+        resources.srcDir(layout.buildDirectory.dir("generated-resources/bundled-addons"))
+    }
+}
+
 dependencies {
     implementation("dev.daisycloud:cloud-model:$version")
 
@@ -29,6 +47,10 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+tasks.named("processResources") {
+    dependsOn(copyBundledAddons)
 }
 
 publishing {

@@ -47,6 +47,7 @@ public record MinecraftNodeAgentTask(
                 "prepare-daisybase:" + planned.getOrDefault("databaseResourceId", "disabled"),
                 "resolve-marketplace-content:" + planned.getOrDefault("marketplaceMode", "offline"),
                 "write-startup-files:" + String.join(",", manifest.startupFiles().files().keySet()),
+                "install-bundled-addons:" + planned.getOrDefault("bundledAddonPlan", "disabled"),
                 "bind-ports:" + joinMap(manifest.portBindings()),
                 "activate-instance:" + planned.getOrDefault("activeInstance", "primary"),
                 "start-container:" + manifest.serviceName(),

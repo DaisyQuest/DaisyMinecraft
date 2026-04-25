@@ -60,6 +60,8 @@ public final class MinecraftNodeAgentExecutor {
             runtimeDriver.writeStartupFile(serviceName, file.getKey(), file.getValue());
         }
         appliedSteps.put("write-startup-files", require(attributes, "startupFileNames"));
+        appliedSteps.put("install-bundled-addons",
+                MinecraftBundledAddons.installBundledAddons(runtimeDriver, serviceName, attributes));
         for (Map.Entry<String, String> port : portBindings.entrySet()) {
             runtimeDriver.bindPort(serviceName, port.getKey(), port.getValue());
         }

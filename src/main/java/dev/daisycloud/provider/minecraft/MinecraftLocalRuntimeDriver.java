@@ -95,6 +95,16 @@ public final class MinecraftLocalRuntimeDriver implements MinecraftRuntimeDriver
     }
 
     @Override
+    public void writeBinaryFile(String serviceName, String fileName, byte[] content) {
+        safeToken(serviceName, "serviceName");
+        Path dataDirectory = dataDirectory(serviceName);
+        Path target = dataDirectory.resolve(safeRelativePath(fileName)).normalize();
+        ensureInside(dataDirectory, target);
+        createDirectories(target.getParent());
+        writeBytes(target, Objects.requireNonNull(content, "content must not be null"));
+    }
+
+    @Override
     public void bindPort(String serviceName, String containerPort, String hostPort) {
         String safeService = safeToken(serviceName, "serviceName");
         requireText(containerPort, "containerPort");
@@ -317,6 +327,18 @@ public final class MinecraftLocalRuntimeDriver implements MinecraftRuntimeDriver
                 Files.createDirectories(parent);
             }
             Files.writeString(path, content, StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            throw new IllegalStateException("Failed to write " + path + ": " + error.getMessage(), error);
+        }
+    }
+
+    private static void writeBytes(Path path, byte[] content) {
+        try {
+            Path parent = path.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.write(path, content);
         } catch (IOException error) {
             throw new IllegalStateException("Failed to write " + path + ": " + error.getMessage(), error);
         }

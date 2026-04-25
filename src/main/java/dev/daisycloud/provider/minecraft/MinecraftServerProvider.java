@@ -231,6 +231,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             String modpackId,
             List<String> selectedMods,
             List<String> selectedPlugins,
+            String daisyCompanion,
             int memoryMb,
             int vcpu,
             int storageGb,
@@ -306,6 +307,12 @@ public final class MinecraftServerProvider implements ResourceProvider {
                     MOD_SOURCES,
                     "modSource");
             validateContentSelection(serverType, modSource, modpackId, selectedMods, selectedPlugins);
+            String daisyCompanion = enumValue(optional(attributes,
+                            "daisyCompanion",
+                            MinecraftBundledAddons.defaultDaisyCompanionMode(serverType)),
+                    ENABLED_MODES,
+                    "daisyCompanion");
+            MinecraftBundledAddons.validateDaisyCompanion(daisyCompanion, serverType);
 
             int memoryMb = boundedInt(optional(attributes, "memoryMb", defaultMemoryMb(modpackId, selectedMods)),
                     "memoryMb", 512, 262_144);
@@ -428,6 +435,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
                     modpackId,
                     selectedMods,
                     selectedPlugins,
+                    daisyCompanion,
                     memoryMb,
                     vcpu,
                     storageGb,
@@ -490,6 +498,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             planned.put("modpackId", modpackId);
             planned.put("selectedMods", String.join(",", selectedMods));
             planned.put("selectedPlugins", String.join(",", selectedPlugins));
+            planned.put("daisyCompanion", daisyCompanion);
             planned.put("memoryMb", Integer.toString(memoryMb));
             planned.put("vcpu", Integer.toString(vcpu));
             planned.put("storageGb", Integer.toString(storageGb));
@@ -530,6 +539,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             planned.put("panelUrl", "enabled".equals(adminPanel)
                     ? "https://" + serverName + ".panel." + region + ".mc.internal"
                     : "");
+            planned.putAll(MinecraftBundledAddons.fromPlannedAttributes(planned));
             planned.putAll(MinecraftAdminPanelProfile.fromPlannedAttributes(planned).toProviderAttributes());
             planned.putAll(MinecraftNetworkPolicyProfile.fromPlannedAttributes(planned).toProviderAttributes());
             planned.put("databaseMode", databaseMode);
@@ -558,6 +568,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
                     "EULA accepted;Runtime profile captured;Admin panel policy captured;Mod selection locked;"
                             + "Content lock digested;Backup policy captured;Network policy captured;"
                             + "DaisyBase control plane planned;Marketplace profile captured;"
+                            + "Bundled companion plugin planned;"
                             + "Instance manager captured;Admin UX workflows captured;"
                             + "Container image planned;Startup files rendered");
             return Map.copyOf(planned);

@@ -9,6 +9,8 @@ public interface MinecraftRuntimeDriver {
 
     void writeStartupFile(String serviceName, String fileName, String content);
 
+    void writeBinaryFile(String serviceName, String fileName, byte[] content);
+
     void bindPort(String serviceName, String containerPort, String hostPort);
 
     void startContainer(MinecraftRuntimeContainerSpec spec);

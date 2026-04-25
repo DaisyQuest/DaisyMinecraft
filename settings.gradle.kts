@@ -10,6 +10,10 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         maven {
+            name = "PaperMC"
+            url = uri("https://repo.papermc.io/repository/maven-public/")
+        }
+        maven {
             name = "DaisyCloudGitHubPackages"
             url = uri("https://maven.pkg.github.com/DaisyQuest/DaisyCloud")
             credentials {
@@ -30,6 +34,9 @@ dependencyResolutionManagement {
         }
     }
 }
+
+include("daisy-companion-plugin")
+project(":daisy-companion-plugin").projectDir = file("mods/daisy-companion-plugin")
 
 rootProject.name = "DaisyMinecraft"
 

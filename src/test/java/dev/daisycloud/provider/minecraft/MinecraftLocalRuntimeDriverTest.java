@@ -24,6 +24,7 @@ class MinecraftLocalRuntimeDriverTest {
         driver.pullImage("daisycloud/minecraft-paper:1.21.11");
         driver.ensureVolume("daisycloud-mc-test", "/data");
         driver.writeStartupFile("mc-test", "server.properties", "server-port=25565\nmax-players=20\n");
+        driver.writeBinaryFile("mc-test", "plugins/DaisyCompanion.jar", new byte[] {1, 2, 3});
         driver.bindPort("mc-test", "25565/tcp", "65534");
 
         MinecraftRuntimeContainerSpec spec = new MinecraftRuntimeContainerSpec(
@@ -45,6 +46,10 @@ class MinecraftLocalRuntimeDriverTest {
                 .contains("daisycloud/minecraft-paper:1.21.11"));
         assertTrue(Files.readString(runtimeRoot.resolve("volumes").resolve("daisycloud-mc-test").resolve("server.properties"))
                 .contains("max-players=20"));
+        assertEquals(3, Files.size(runtimeRoot.resolve("volumes")
+                .resolve("daisycloud-mc-test")
+                .resolve("plugins")
+                .resolve("DaisyCompanion.jar")));
         assertTrue(Files.exists(runtimeRoot.resolve("services").resolve("mc-test").resolve("container-spec.properties")));
         assertEquals("missing-server-jar", driver.probeHealth("mc-test", Map.of("process", "running")).get("process"));
         assertEquals("not-reachable", driver.probeHealth("mc-test", Map.of("port", "reachable")).get("port"));
@@ -59,6 +64,7 @@ class MinecraftLocalRuntimeDriverTest {
 
         assertThrows(IllegalArgumentException.class, () -> driver.ensureVolume("../bad", "/data"));
         assertThrows(IllegalArgumentException.class, () -> driver.writeStartupFile("mc-test", "../server.properties", "bad"));
+        assertThrows(IllegalArgumentException.class, () -> driver.writeBinaryFile("mc-test", "../bad.jar", new byte[] {1}));
         assertThrows(IllegalArgumentException.class, () -> driver.bindPort("mc test", "25565/tcp", "25565"));
     }
 }

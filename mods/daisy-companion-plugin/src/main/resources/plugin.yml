@@ -1,0 +1,6 @@
+name: DaisyCompanion
+version: ${version}
+main: dev.daisycloud.minecraft.companion.DaisyCompanionPlugin
+api-version: '1.21'
+description: Gives every new DaisyMinecraft player a loyal dog named Daisy.
+author: DaisyCloud
