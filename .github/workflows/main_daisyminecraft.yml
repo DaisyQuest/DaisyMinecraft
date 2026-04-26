@@ -109,11 +109,34 @@ jobs:
           -Pdaisyminecraft.useDaisyCloudArtifacts=true
           -Pdaisyminecraft.daisyCloudArtifactsDir="${GITHUB_WORKSPACE}/build/daisycloud-artifacts"
 
+      - name: Stage Azure deployment package
+        run: |
+          set -euo pipefail
+
+          package_dir="${GITHUB_WORKSPACE}/build/azure-package"
+          mkdir -p "${package_dir}"
+
+          mapfile -t deploy_jars < <(find "${GITHUB_WORKSPACE}/build/libs" \
+            -maxdepth 1 \
+            -type f \
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" \
+            | sort)
+
+          if [ "${#deploy_jars[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one deployable jar, found ${#deploy_jars[@]}."
+            printf '%s\n' "${deploy_jars[@]}"
+            exit 1
+          fi
+
+          cp "${deploy_jars[0]}" "${package_dir}/DaisyMinecraft.jar"
+
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: java-app
-          path: '${{ github.workspace }}/build/libs/*.jar'
+          path: '${{ github.workspace }}/build/azure-package/DaisyMinecraft.jar'
 
   deploy:
     runs-on: ubuntu-latest
@@ -131,5 +154,5 @@ jobs:
         with:
           app-name: 'DaisyMinecraft'
           slot-name: 'Production'
-          package: '*.jar'
+          package: 'DaisyMinecraft.jar'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_32CA0086C4964E53BEAAE559A3221FAB }}
