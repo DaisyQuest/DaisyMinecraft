@@ -23,8 +23,8 @@ dependencyResolutionManagement {
                     .orElse("not-set")
                     .get()
                 password = providers.gradleProperty("gpr.key")
-                    .orElse(providers.environmentVariable("GITHUB_TOKEN"))
                     .orElse(providers.environmentVariable("GITHUB_PACKAGES_TOKEN"))
+                    .orElse(providers.environmentVariable("GITHUB_TOKEN"))
                     .orElse("not-set")
                     .get()
             }
