@@ -35,11 +35,6 @@ sourceSets {
 }
 
 dependencies {
-    implementation("dev.daisycloud:cloud-model:$version")
-
-    api("dev.daisycloud:cloud-provider-spi:$version")
-    api("dev.daisycloud:cloud-provider-daisybase:$version")
-
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
