@@ -34,10 +34,7 @@ public final class DaisyCompanionPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if (settings.onlyFirstJoin() && player.hasPlayedBefore()) {
-            return;
-        }
-        if (hasReceivedCompanion(player)) {
+        if (settings.onlyFirstJoin() && hasReceivedCompanion(player)) {
             return;
         }
         UUID playerId = player.getUniqueId();
@@ -67,7 +64,9 @@ public final class DaisyCompanionPlugin extends JavaPlugin implements Listener {
         }
 
         player.getWorld().spawn(player.getLocation(), Wolf.class, wolf -> configureWolf(wolf, player));
-        player.getPersistentDataContainer().set(receivedKey, PersistentDataType.BYTE, (byte) 1);
+        if (settings.onlyFirstJoin()) {
+            player.getPersistentDataContainer().set(receivedKey, PersistentDataType.BYTE, (byte) 1);
+        }
         getLogger().info("Spawned Daisy companion for " + player.getName());
     }
 
