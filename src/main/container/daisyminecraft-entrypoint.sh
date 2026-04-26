@@ -80,6 +80,35 @@ copy_bundled_server_jar() {
   cp "$bundled" "$jar_name"
 }
 
+copy_bundled_plugins() {
+  enabled="$(lower "${DAISY_MINECRAFT_INSTALL_BUNDLED_PLUGINS:-true}")"
+  case "$enabled" in
+    true|1|yes) ;;
+    *) return 0 ;;
+  esac
+
+  source_dir="/opt/daisyminecraft/bundled-plugins"
+  [ -d "$source_dir" ] || return 0
+
+  found=0
+  for plugin in "$source_dir"/*.jar; do
+    [ -f "$plugin" ] || continue
+    found=1
+    target="plugins/$(basename "$plugin")"
+    if [ -s "$target" ]; then
+      log "Bundled plugin already present: $target"
+      continue
+    fi
+    log "Installing bundled plugin: $target"
+    cp "$plugin" "$target"
+    chmod 0644 "$target"
+  done
+
+  if [ "$found" -eq 0 ]; then
+    log "No bundled plugins found in $source_dir"
+  fi
+}
+
 require_eula
 
 DATA_DIR="${DAISY_MINECRAFT_DATA_DIR:-/data}"
@@ -97,6 +126,7 @@ printf 'eula=true\n' > eula.txt
 
 download_custom_jar
 copy_bundled_server_jar
+copy_bundled_plugins
 
 if [ -n "${DAISY_MINECRAFT_CUSTOM_SERVER_COMMAND:-}" ]; then
   log "Starting custom server command"

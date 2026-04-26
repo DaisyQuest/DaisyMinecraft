@@ -11,6 +11,7 @@ ENV DAISY_MINECRAFT_DATA_DIR=/data
 ENV DAISY_MINECRAFT_PORT=25565
 ENV DAISY_MINECRAFT_MEMORY_MB=2048
 ENV DAISY_MINECRAFT_SERVER_JAR_NAME=server.jar
+ENV DAISY_MINECRAFT_INSTALL_BUNDLED_PLUGINS=true
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl netcat-openbsd procps tini \
@@ -28,8 +29,11 @@ RUN apt-get update \
 
 COPY daisyminecraft-entrypoint.sh /usr/local/bin/daisyminecraft-entrypoint
 COPY daisyminecraft-healthcheck.sh /usr/local/bin/daisyminecraft-healthcheck
+COPY bundled-plugins/ /opt/daisyminecraft/bundled-plugins/
 
-RUN chmod 0755 /usr/local/bin/daisyminecraft-entrypoint /usr/local/bin/daisyminecraft-healthcheck
+RUN chmod 0755 /usr/local/bin/daisyminecraft-entrypoint /usr/local/bin/daisyminecraft-healthcheck \
+    && find /opt/daisyminecraft/bundled-plugins -type f -name '*.jar' -exec chmod 0644 {} \; \
+    && chown -R minecraft:minecraft /opt/daisyminecraft/bundled-plugins
 
 USER minecraft:minecraft
 WORKDIR /data

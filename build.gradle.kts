@@ -95,6 +95,18 @@ tasks.named("processResources") {
 }
 
 val minecraftContainerDir = layout.projectDirectory.dir("src/main/container")
+val minecraftContainerContextDir = layout.buildDirectory.dir("minecraft-server-container-context")
+
+val prepareMinecraftContainerContext = tasks.register<Copy>("prepareMinecraftContainerContext") {
+    val companionJar = project(":daisy-companion-plugin").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+    dependsOn(":daisy-companion-plugin:jar")
+    from(minecraftContainerDir)
+    into(minecraftContainerContextDir)
+    from(companionJar) {
+        into("bundled-plugins")
+        rename { "DaisyCompanion.jar" }
+    }
+}
 
 val verifyMinecraftContainer = tasks.register("verifyMinecraftContainer") {
     val dockerfile = minecraftContainerDir.file("Dockerfile")
@@ -111,11 +123,17 @@ val verifyMinecraftContainer = tasks.register("verifyMinecraftContainer") {
         require("DAISY_MINECRAFT_BUNDLED_SERVER_JAR_URL" in dockerfileText && "sha256sum -c" in dockerfileText) {
             "Minecraft container Dockerfile must bake a SHA-256 verified default server jar."
         }
+        require("bundled-plugins" in dockerfileText && "DAISY_MINECRAFT_INSTALL_BUNDLED_PLUGINS" in dockerfileText) {
+            "Minecraft container Dockerfile must include bundled DaisyMinecraft plugins."
+        }
         require("HEALTHCHECK" in dockerfileText && "25565/tcp" in dockerfileText && "25565/udp" in dockerfileText) {
             "Minecraft container Dockerfile must expose and healthcheck the game endpoint."
         }
         require("EULA" in entrypointText && "sha256sum -c" in entrypointText && "curl --fail" in entrypointText) {
             "Minecraft entrypoint must enforce EULA and verified custom jar downloads."
+        }
+        require("copy_bundled_plugins" in entrypointText && "DaisyCompanion.jar" !in entrypointText) {
+            "Minecraft entrypoint must generically seed bundled plugins into the data volume."
         }
         require("DAISY_MINECRAFT_CUSTOM_SERVER_COMMAND" in entrypointText && "java" in entrypointText) {
             "Minecraft entrypoint must support custom commands and default Java jar startup."
@@ -131,8 +149,8 @@ tasks.named("check") {
 }
 
 tasks.register<Zip>("packageMinecraftContainer") {
-    dependsOn(verifyMinecraftContainer)
-    from(minecraftContainerDir)
+    dependsOn(verifyMinecraftContainer, prepareMinecraftContainerContext)
+    from(minecraftContainerContextDir)
     archiveBaseName.set("daisyminecraft-server-container")
     archiveVersion.set(project.version.toString())
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))

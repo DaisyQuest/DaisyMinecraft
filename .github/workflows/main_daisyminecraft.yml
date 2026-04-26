@@ -121,6 +121,9 @@ jobs:
             -OutputName server.jar `
             -GitHubEnvPath $env:GITHUB_ENV
 
+      - name: Prepare Minecraft server container context
+        run: ./gradlew prepareMinecraftContainerContext
+
       - name: Validate Minecraft server container image
         run: >
           docker build --pull
@@ -128,7 +131,7 @@ jobs:
           --build-arg "DAISY_MINECRAFT_BUNDLED_SERVER_JAR_SHA256=${PAPER_JAR_SHA256}"
           -t "${MINECRAFT_SERVER_IMAGE}:${GITHUB_SHA}"
           -t "${MINECRAFT_SERVER_IMAGE}:latest"
-          src/main/container
+          build/minecraft-server-container-context
 
       - name: Publish Minecraft server container image
         if: github.ref == 'refs/heads/main'
