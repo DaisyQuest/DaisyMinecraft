@@ -97,6 +97,12 @@ tasks.named<Jar>("sourcesJar") {
     dependsOn(copyBundledAddons)
 }
 
+tasks.named<Jar>("jar") {
+    manifest {
+        attributes["Main-Class"] = "dev.daisycloud.provider.minecraft.DaisyMinecraftApp"
+    }
+}
+
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
