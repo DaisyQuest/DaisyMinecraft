@@ -27,6 +27,14 @@ param(
 
     [string]$ControlPlaneAppName = "DaisyMinecraft",
 
+    [string]$VnetName = "daisyminecraft-vnet",
+
+    [string]$VnetAddressPrefix = "10.42.0.0/16",
+
+    [string]$InfrastructureSubnetName = "containerapps-infra",
+
+    [string]$InfrastructureSubnetPrefix = "10.42.0.0/23",
+
     [string]$ServerJarUrl,
 
     [string]$ServerJarSha256,
@@ -56,6 +64,71 @@ function Az-Json([string[]]$Arguments) {
     return $json | ConvertFrom-Json
 }
 
+function Az-Tsv([string[]]$Arguments) {
+    $value = az @Arguments --only-show-errors -o tsv
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+    return $value
+}
+
+function Test-AzCommand([string[]]$Arguments) {
+    az @Arguments --only-show-errors 1>$null 2>$null
+    return $LASTEXITCODE -eq 0
+}
+
+function Ensure-ContainerAppsVnet() {
+    az provider register --namespace Microsoft.ContainerService --only-show-errors | Out-Null
+
+    $vnetExists = Test-AzCommand @(
+        "network", "vnet", "show",
+        "--resource-group", $ResourceGroup,
+        "--name", $VnetName
+    )
+    if (-not $vnetExists) {
+        az network vnet create `
+            --resource-group $ResourceGroup `
+            --name $VnetName `
+            --location $Location `
+            --address-prefix $VnetAddressPrefix `
+            --only-show-errors | Out-Null
+    }
+
+    $subnetExists = Test-AzCommand @(
+        "network", "vnet", "subnet", "show",
+        "--resource-group", $ResourceGroup,
+        "--vnet-name", $VnetName,
+        "--name", $InfrastructureSubnetName
+    )
+    if (-not $subnetExists) {
+        az network vnet subnet create `
+            --resource-group $ResourceGroup `
+            --vnet-name $VnetName `
+            --name $InfrastructureSubnetName `
+            --address-prefixes $InfrastructureSubnetPrefix `
+            --only-show-errors | Out-Null
+    }
+
+    az network vnet subnet update `
+        --resource-group $ResourceGroup `
+        --vnet-name $VnetName `
+        --name $InfrastructureSubnetName `
+        --delegations Microsoft.App/environments `
+        --only-show-errors | Out-Null
+
+    $subnetId = Az-Tsv @(
+        "network", "vnet", "subnet", "show",
+        "--resource-group", $ResourceGroup,
+        "--vnet-name", $VnetName,
+        "--name", $InfrastructureSubnetName,
+        "--query", "id"
+    )
+    if (-not $subnetId) {
+        throw "Could not resolve infrastructure subnet ID for $VnetName/$InfrastructureSubnetName."
+    }
+    return $subnetId.Trim()
+}
+
 if ($GamePort -lt 1 -or $GamePort -gt 65535 -or $GamePort -in @(80, 443)) {
     throw "GamePort must be between 1 and 65535 and cannot be 80 or 443 for TCP ingress."
 }
@@ -65,19 +138,30 @@ Require-Az
 az extension add --name containerapp --upgrade --only-show-errors | Out-Null
 az group create --name $ResourceGroup --location $Location --only-show-errors | Out-Null
 
-$environmentExists = $true
-try {
-    az containerapp env show --name $EnvironmentName --resource-group $ResourceGroup --only-show-errors | Out-Null
-} catch {
-    $environmentExists = $false
-}
+$environmentExists = Test-AzCommand @(
+    "containerapp", "env", "show",
+    "--name", $EnvironmentName,
+    "--resource-group", $ResourceGroup
+)
 
 if (-not $environmentExists) {
+    $infrastructureSubnetId = Ensure-ContainerAppsVnet
     az containerapp env create `
         --name $EnvironmentName `
         --resource-group $ResourceGroup `
         --location $Location `
+        --infrastructure-subnet-resource-id $infrastructureSubnetId `
         --only-show-errors | Out-Null
+} else {
+    $environmentVnet = Az-Tsv @(
+        "containerapp", "env", "show",
+        "--name", $EnvironmentName,
+        "--resource-group", $ResourceGroup,
+        "--query", "properties.vnetConfiguration.infrastructureSubnetId"
+    )
+    if (-not $environmentVnet) {
+        throw "Container Apps environment $EnvironmentName exists without a custom VNet. External TCP ingress requires a custom VNet-backed environment. Delete or recreate the environment, then rerun this script."
+    }
 }
 
 $envVars = @(
@@ -99,12 +183,11 @@ if ($ServerJarUrl -or $ServerJarSha256) {
     )
 }
 
-$appExists = $true
-try {
-    az containerapp show --name $ContainerAppName --resource-group $ResourceGroup --only-show-errors | Out-Null
-} catch {
-    $appExists = $false
-}
+$appExists = Test-AzCommand @(
+    "containerapp", "show",
+    "--name", $ContainerAppName,
+    "--resource-group", $ResourceGroup
+)
 
 if ($appExists) {
     az containerapp update `

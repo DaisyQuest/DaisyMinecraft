@@ -51,13 +51,15 @@ az login
 
 On `main`, CI validates and publishes the image as `ghcr.io/daisyquest/daisyminecraft-server:latest`. The Azure App Service deployment is only the HTTP control plane; point `DAISYMINECRAFT_MINECRAFT_ENDPOINT` at a real TCP-capable deployment, such as Azure Container Apps TCP ingress, before showing a Minecraft client endpoint as connectable.
 
+Azure Container Apps external TCP ingress requires an environment backed by a custom VNet. The deployment script creates/reuses a dedicated VNet and delegated infrastructure subnet before creating the server app.
+
 After `az login`, deploy the server runtime to Azure Container Apps and wire the control plane to the resulting TCP endpoint with:
 
 ```powershell
 .\scripts\deploy-minecraft-containerapp.ps1 `
   -ResourceGroup <resource-group> `
   -Location <azure-region> `
-  -EnvironmentName <container-apps-environment> `
+  -EnvironmentName <vnet-backed-container-apps-environment> `
   -ContainerAppName <minecraft-container-app>
 ```
 
