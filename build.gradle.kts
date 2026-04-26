@@ -53,6 +53,10 @@ tasks.named("processResources") {
     dependsOn(copyBundledAddons)
 }
 
+tasks.named<Jar>("sourcesJar") {
+    dependsOn(copyBundledAddons)
+}
+
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {

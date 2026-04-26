@@ -40,7 +40,12 @@ project(":daisy-companion-plugin").projectDir = file("mods/daisy-companion-plugi
 
 rootProject.name = "DaisyMinecraft"
 
-val daisyCloudComposite = file("../DaisyCloud")
+val daisyCloudComposite = file(
+    providers.gradleProperty("daisyminecraft.daisyCloudCompositePath")
+        .orElse(providers.environmentVariable("DAISYMINECRAFT_DAISYCLOUD_COMPOSITE_PATH"))
+        .orElse("../DaisyCloud")
+        .get()
+)
 val useDaisyCloudComposite = providers.gradleProperty("daisyminecraft.includeDaisyCloudComposite")
     .map(String::toBoolean)
     .orElse(daisyCloudComposite.isDirectory)

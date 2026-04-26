@@ -19,6 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout DaisyCloud composite build
+        uses: actions/checkout@v4
+        with:
+          repository: DaisyQuest/DaisyCloud
+          path: DaisyCloud
+          token: ${{ secrets.DAISYQUEST_REPO_TOKEN || github.token }}
+
       - name: Set up Java version
         uses: actions/setup-java@v4
         with:
@@ -26,9 +33,12 @@ jobs:
           distribution: 'microsoft'
 
       - name: Build with Gradle
-        run: ./gradlew build
+        run: >
+          ./gradlew build
+          -Pdaisyminecraft.includeDaisyCloudComposite=true
+          -Pdaisyminecraft.daisyCloudCompositePath="${GITHUB_WORKSPACE}/DaisyCloud"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
 
       - name: Upload artifact for deployment job
