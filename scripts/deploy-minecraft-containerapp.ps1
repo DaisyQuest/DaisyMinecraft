@@ -27,6 +27,12 @@ param(
 
     [string]$ControlPlaneAppName = "DaisyMinecraft",
 
+    [string]$ServerJarUrl,
+
+    [string]$ServerJarSha256,
+
+    [string]$ServerJarName = "server.jar",
+
     [switch]$SkipControlPlaneAppSetting
 )
 
@@ -79,8 +85,19 @@ $envVars = @(
     "DAISY_MINECRAFT_EULA_ACCEPTED=true",
     "DAISY_MINECRAFT_MEMORY_MB=$MemoryMb",
     "DAISY_MINECRAFT_PORT=$GamePort",
-    "DAISY_MINECRAFT_SERVER_JAR_NAME=server.jar"
+    "DAISY_MINECRAFT_SERVER_JAR_NAME=$ServerJarName"
 )
+
+if ($ServerJarUrl -or $ServerJarSha256) {
+    if (-not $ServerJarUrl -or -not $ServerJarSha256) {
+        throw "ServerJarUrl and ServerJarSha256 must be provided together."
+    }
+    $envVars += @(
+        "DAISY_MINECRAFT_CUSTOM_SERVER_JAR_URL=$ServerJarUrl",
+        "DAISY_MINECRAFT_CUSTOM_SERVER_JAR_SHA256=$ServerJarSha256",
+        "DAISY_MINECRAFT_CUSTOM_SERVER_JAR_NAME=$ServerJarName"
+    )
+}
 
 $appExists = $true
 try {

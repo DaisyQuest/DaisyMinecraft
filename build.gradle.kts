@@ -108,6 +108,9 @@ val verifyMinecraftContainer = tasks.register("verifyMinecraftContainer") {
         require("ENTRYPOINT" in dockerfileText && "daisyminecraft-entrypoint" in dockerfileText) {
             "Minecraft container Dockerfile must configure the DaisyMinecraft entrypoint."
         }
+        require("DAISY_MINECRAFT_BUNDLED_SERVER_JAR_URL" in dockerfileText && "sha256sum -c" in dockerfileText) {
+            "Minecraft container Dockerfile must bake a SHA-256 verified default server jar."
+        }
         require("HEALTHCHECK" in dockerfileText && "25565/tcp" in dockerfileText && "25565/udp" in dockerfileText) {
             "Minecraft container Dockerfile must expose and healthcheck the game endpoint."
         }

@@ -22,11 +22,31 @@ Set `-Pdaisyminecraft.includeDaisyCloudComposite=false` to resolve DaisyCloud de
 ## Minecraft Server Container
 
 The managed server image lives in `src/main/container`. It enforces explicit Minecraft EULA acceptance, writes `eula.txt`, supports SHA-256 verified custom server jar downloads, supports custom launch commands, exposes `25565/tcp` and `25565/udp`, and includes a port/process healthcheck.
+CI now resolves the latest stable Paper server jar, verifies its SHA-256, uploads it as a GitHub Actions artifact named `minecraft-server-jar`, and bakes it into the published GHCR runtime image. The container can still be pointed at a custom jar URL for Mohist, Purpur, Vanilla, proxy, or user-provided runtimes.
 
 Package the Docker context for CI or registry build handoff with:
 
 ```powershell
 .\gradlew.bat packageMinecraftContainer
+```
+
+Prepare the default Paper server jar locally with:
+
+```powershell
+.\scripts\prepare-minecraft-server-jar.ps1
+```
+
+Upload that jar to Azure Blob Storage for `DAISY_MINECRAFT_CUSTOM_SERVER_JAR_URL` deployments with:
+
+```powershell
+az login
+.\scripts\prepare-minecraft-server-jar.ps1 `
+  -Upload `
+  -StorageAccountName <storage-account-name> `
+  -ResourceGroup <resource-group> `
+  -Location <azure-region> `
+  -StorageContainerName minecraft-artifacts `
+  -BlobName server.jar
 ```
 
 On `main`, CI validates and publishes the image as `ghcr.io/daisyquest/daisyminecraft-server:latest`. The Azure App Service deployment is only the HTTP control plane; point `DAISYMINECRAFT_MINECRAFT_ENDPOINT` at a real TCP-capable deployment, such as Azure Container Apps TCP ingress, before showing a Minecraft client endpoint as connectable.

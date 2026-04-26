@@ -113,9 +113,19 @@ jobs:
           -Pdaisyminecraft.useDaisyCloudArtifacts=true
           -Pdaisyminecraft.daisyCloudArtifactsDir="${GITHUB_WORKSPACE}/build/daisycloud-artifacts"
 
+      - name: Prepare Minecraft server jar
+        shell: pwsh
+        run: |
+          ./scripts/prepare-minecraft-server-jar.ps1 `
+            -OutputDirectory "${{ github.workspace }}/build/minecraft-server-jars" `
+            -OutputName server.jar `
+            -GitHubEnvPath $env:GITHUB_ENV
+
       - name: Validate Minecraft server container image
         run: >
           docker build --pull
+          --build-arg "DAISY_MINECRAFT_BUNDLED_SERVER_JAR_URL=${PAPER_JAR_URL}"
+          --build-arg "DAISY_MINECRAFT_BUNDLED_SERVER_JAR_SHA256=${PAPER_JAR_SHA256}"
           -t "${MINECRAFT_SERVER_IMAGE}:${GITHUB_SHA}"
           -t "${MINECRAFT_SERVER_IMAGE}:latest"
           src/main/container
@@ -165,6 +175,14 @@ jobs:
         with:
           name: minecraft-server-container
           path: '${{ github.workspace }}/build/distributions/daisyminecraft-server-container-*.zip'
+
+      - name: Upload Minecraft server jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-server-jar
+          path: |
+            ${{ github.workspace }}/build/minecraft-server-jars/server.jar
+            ${{ github.workspace }}/build/minecraft-server-jars/server.jar.manifest.json
 
   deploy:
     runs-on: ubuntu-latest

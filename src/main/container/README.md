@@ -17,4 +17,6 @@ The entrypoint starts from one of these sources:
 - A baked `/opt/daisyminecraft/server/server.jar`
 - An existing jar in `/data` named by `DAISY_MINECRAFT_SERVER_JAR_NAME`
 
+The published DaisyMinecraft image bakes a SHA-256 verified Paper server jar into `/opt/daisyminecraft/server/server.jar`. CI also uploads the same file as the `minecraft-server-jar` workflow artifact. Use `scripts/prepare-minecraft-server-jar.ps1` to recreate the jar locally or upload it to Azure Blob Storage for custom URL deployments.
+
 Custom commands are supported through `DAISY_MINECRAFT_CUSTOM_SERVER_COMMAND` for advanced runtimes such as Mohist, proxy stacks, or vendor-provided launchers.
