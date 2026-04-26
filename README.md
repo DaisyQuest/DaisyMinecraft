@@ -53,6 +53,7 @@ az login
 On `main`, CI validates and publishes the image as `ghcr.io/daisyquest/daisyminecraft-server:latest`. The Azure App Service deployment is only the HTTP control plane; point `DAISYMINECRAFT_MINECRAFT_ENDPOINT` at a real TCP-capable deployment, such as Azure Container Apps TCP ingress, before showing a Minecraft client endpoint as connectable.
 
 Azure Container Apps external TCP ingress requires an environment backed by a custom VNet. The deployment script creates/reuses a dedicated VNet and delegated infrastructure subnet before creating the server app.
+The default deployment keeps the Java heap below the container memory limit so Paper has native/headroom during plugin remapping and world startup. For production servers with bundled plugins, prefer at least `-Memory 4Gi -Cpu 2.0 -MemoryMb 3072`.
 
 After `az login`, deploy the server runtime to Azure Container Apps and wire the control plane to the resulting TCP endpoint with:
 

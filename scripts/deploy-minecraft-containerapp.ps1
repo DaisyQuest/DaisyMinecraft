@@ -15,7 +15,7 @@ param(
 
     [int]$GamePort = 25565,
 
-    [int]$MemoryMb = 2048,
+    [int]$MemoryMb = 1536,
 
     [decimal]$Cpu = 1.0,
 
