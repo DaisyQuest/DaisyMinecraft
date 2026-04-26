@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read #This is required for actions/checkout
+      actions: read #This is required when using github.token for artifact metadata
 
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +25,89 @@ jobs:
           java-version: '21'
           distribution: 'microsoft'
 
+      - name: Download DaisyCloud published artifacts
+        env:
+          GH_TOKEN: ${{ secrets.DAISYQUEST_REPO_TOKEN || github.token }}
+          DAISYCLOUD_REPOSITORY: DaisyQuest/DaisyCloud
+          DAISYCLOUD_WORKFLOW: publish-packages.yml
+          DAISYCLOUD_ARTIFACT_NAME: daisycloud-build-artifacts
+        run: |
+          set -euo pipefail
+
+          api="https://api.github.com/repos/${DAISYCLOUD_REPOSITORY}"
+          artifacts_dir="${GITHUB_WORKSPACE}/build/daisycloud-artifacts"
+          artifact_zip="${GITHUB_WORKSPACE}/build/daisycloud-artifacts.zip"
+          mkdir -p "${artifacts_dir}"
+
+          auth_header=()
+          if [ -n "${GH_TOKEN:-}" ]; then
+            auth_header=(-H "Authorization: Bearer ${GH_TOKEN}")
+          fi
+
+          runs_json="$(mktemp)"
+          if ! curl --fail --silent --show-error "${auth_header[@]}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api}/actions/workflows/${DAISYCLOUD_WORKFLOW}/runs?status=success&per_page=1" \
+              > "${runs_json}"; then
+            echo "::error::Cannot read DaisyCloud workflow artifacts. Set DAISYQUEST_REPO_TOKEN with Actions read access to ${DAISYCLOUD_REPOSITORY}."
+            exit 1
+          fi
+
+          run_id="$(python3 - "${runs_json}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              runs = json.load(handle).get("workflow_runs", [])
+          print(runs[0]["id"] if runs else "")
+          PY
+          )"
+          if [ -z "${run_id}" ]; then
+            echo "::error::No successful ${DAISYCLOUD_WORKFLOW} run found in ${DAISYCLOUD_REPOSITORY}."
+            exit 1
+          fi
+
+          artifacts_json="$(mktemp)"
+          curl --fail --silent --show-error "${auth_header[@]}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}/actions/runs/${run_id}/artifacts?per_page=100" \
+            > "${artifacts_json}"
+
+          artifact_id="$(python3 - "${artifacts_json}" "${DAISYCLOUD_ARTIFACT_NAME}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              artifacts = json.load(handle).get("artifacts", [])
+          name = sys.argv[2]
+          matches = [artifact for artifact in artifacts if artifact.get("name") == name and not artifact.get("expired")]
+          print(matches[0]["id"] if matches else "")
+          PY
+          )"
+          if [ -z "${artifact_id}" ]; then
+            echo "::error::Artifact ${DAISYCLOUD_ARTIFACT_NAME} was not found on DaisyCloud workflow run ${run_id}."
+            exit 1
+          fi
+
+          curl --fail --location --silent --show-error "${auth_header[@]}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}/actions/artifacts/${artifact_id}/zip" \
+            --output "${artifact_zip}"
+          unzip -q -o "${artifact_zip}" -d "${artifacts_dir}"
+
+          for module in cloud-model cloud-state cloud-provider-spi cloud-provider-daisybase; do
+            if ! find "${artifacts_dir}" -name "${module}-*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" | grep -q .; then
+              echo "::error::Downloaded DaisyCloud artifact is missing ${module} jar."
+              exit 1
+            fi
+          done
+
       - name: Build with Gradle
-        run: ./gradlew build
+        run: >
+          ./gradlew build
+          -Pdaisyminecraft.includeDaisyCloudComposite=false
+          -Pdaisyminecraft.useDaisyCloudArtifacts=true
+          -Pdaisyminecraft.daisyCloudArtifactsDir="${GITHUB_WORKSPACE}/build/daisycloud-artifacts"
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
