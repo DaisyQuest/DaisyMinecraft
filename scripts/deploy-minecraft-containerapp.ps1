@@ -25,6 +25,20 @@ param(
 
     [int]$MaxReplicas = 1,
 
+    [string]$PersistentStorageAccountName,
+
+    [string]$PersistentFileShareName,
+
+    [string]$PersistentStorageMountName,
+
+    [string]$PersistentMountPath = "/mnt/daisy-persist",
+
+    [int]$PersistentFileShareQuotaGb = 256,
+
+    [switch]$SkipPersistentStorage,
+
+    [string]$RevisionSuffix,
+
     [string]$ControlPlaneAppName = "DaisyMinecraft",
 
     [string]$VnetName = "daisyminecraft-vnet",
@@ -77,7 +91,229 @@ function Test-AzCommand([string[]]$Arguments) {
     return $LASTEXITCODE -eq 0
 }
 
+function ConvertTo-YamlSingleQuoted([AllowNull()][string]$Value) {
+    if ($null -eq $Value) {
+        return "''"
+    }
+    return "'" + ($Value -replace "'", "''") + "'"
+}
+
+function New-SafeStorageAccountName([string]$Name) {
+    $clean = $Name.ToLowerInvariant() -replace "[^a-z0-9]", ""
+    $candidate = "${clean}data"
+    if ($candidate.Length -gt 24) {
+        $candidate = $candidate.Substring(0, 24)
+    }
+    if ($candidate.Length -lt 3) {
+        throw "Could not derive a valid storage account name from '$Name'. Provide -PersistentStorageAccountName."
+    }
+    return $candidate
+}
+
+function New-SafeShareName([string]$Name) {
+    $clean = $Name.ToLowerInvariant() -replace "[^a-z0-9-]", "-"
+    $clean = $clean.Trim("-")
+    if ($clean.Length -eq 0) {
+        $clean = "minecraft"
+    }
+    $candidate = "${clean}-data"
+    if ($candidate.Length -gt 63) {
+        $candidate = $candidate.Substring(0, 63).Trim("-")
+    }
+    if ($candidate.Length -lt 3) {
+        throw "Could not derive a valid Azure Files share name from '$Name'. Provide -PersistentFileShareName."
+    }
+    return $candidate
+}
+
+function New-SafeEnvironmentStorageName([string]$Name) {
+    $clean = $Name.ToLowerInvariant() -replace "[^a-z0-9-]", "-"
+    $clean = $clean.Trim("-")
+    if ($clean.Length -eq 0) {
+        $clean = "minecraft"
+    }
+    $candidate = "${clean}-persist"
+    if ($candidate.Length -gt 63) {
+        $candidate = $candidate.Substring(0, 63).Trim("-")
+    }
+    return $candidate
+}
+
+function Ensure-PersistentStorage() {
+    if ($PersistentFileShareQuotaGb -lt 1) {
+        throw "PersistentFileShareQuotaGb must be greater than zero."
+    }
+    if (-not $PersistentStorageAccountName) {
+        $script:PersistentStorageAccountName = New-SafeStorageAccountName $ContainerAppName
+    }
+    if (-not $PersistentFileShareName) {
+        $script:PersistentFileShareName = New-SafeShareName $ContainerAppName
+    }
+    if (-not $PersistentStorageMountName) {
+        $script:PersistentStorageMountName = New-SafeEnvironmentStorageName $ContainerAppName
+    }
+
+    $storageExists = Test-AzCommand @(
+        "storage", "account", "show",
+        "--resource-group", $ResourceGroup,
+        "--name", $PersistentStorageAccountName
+    )
+    if (-not $storageExists) {
+        $availability = Az-Json @(
+            "storage", "account", "check-name",
+            "--name", $PersistentStorageAccountName
+        )
+        if ($availability -and $availability.nameAvailable -eq $false) {
+            throw "Storage account name '$PersistentStorageAccountName' is unavailable. Rerun with a globally unique -PersistentStorageAccountName."
+        }
+        az storage account create `
+            --resource-group $ResourceGroup `
+            --name $PersistentStorageAccountName `
+            --location $Location `
+            --sku Standard_LRS `
+            --kind StorageV2 `
+            --min-tls-version TLS1_2 `
+            --allow-blob-public-access false `
+            --only-show-errors | Out-Null
+    }
+
+    $storageKey = Az-Tsv @(
+        "storage", "account", "keys", "list",
+        "--resource-group", $ResourceGroup,
+        "--account-name", $PersistentStorageAccountName,
+        "--query", "[0].value"
+    )
+    if (-not $storageKey) {
+        throw "Could not resolve a storage account key for '$PersistentStorageAccountName'."
+    }
+
+    az storage share create `
+        --account-name $PersistentStorageAccountName `
+        --account-key $storageKey.Trim() `
+        --name $PersistentFileShareName `
+        --quota $PersistentFileShareQuotaGb `
+        --only-show-errors | Out-Null
+
+    az containerapp env storage set `
+        --name $EnvironmentName `
+        --resource-group $ResourceGroup `
+        --storage-name $PersistentStorageMountName `
+        --azure-file-account-name $PersistentStorageAccountName `
+        --azure-file-account-key $storageKey.Trim() `
+        --azure-file-share-name $PersistentFileShareName `
+        --access-mode ReadWrite `
+        --only-show-errors | Out-Null
+
+    return [pscustomobject]@{
+        storageAccount = $PersistentStorageAccountName
+        fileShare = $PersistentFileShareName
+        environmentStorageName = $PersistentStorageMountName
+        mountPath = $PersistentMountPath
+        quotaGb = $PersistentFileShareQuotaGb
+    }
+}
+
+function Write-ContainerAppYaml([string]$Path, [string]$EnvironmentId, [array]$EnvVars, [object]$PersistentStorage) {
+    $cpuValue = $Cpu.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    if (-not $RevisionSuffix) {
+        $script:RevisionSuffix = "deploy-" + (Get-Date -Format "yyyyMMddHHmmss")
+    }
+
+    $lines = @(
+        "name: $ContainerAppName",
+        "type: Microsoft.App/containerApps",
+        "location: $Location",
+        "properties:",
+        "  environmentId: $EnvironmentId",
+        "  configuration:",
+        "    activeRevisionsMode: Single",
+        "    ingress:",
+        "      external: true",
+        "      targetPort: $GamePort",
+        "      exposedPort: $GamePort",
+        "      transport: Tcp",
+        "      traffic:",
+        "      - latestRevision: true",
+        "        weight: 100",
+        "  template:",
+        "    containers:",
+        "    - name: $ContainerAppName",
+        "      image: $(ConvertTo-YamlSingleQuoted $Image)",
+        "      env:"
+    )
+
+    foreach ($entry in $EnvVars) {
+        $separator = $entry.IndexOf("=")
+        if ($separator -lt 1) {
+            throw "Invalid environment variable entry '$entry'. Expected NAME=value."
+        }
+        $name = $entry.Substring(0, $separator)
+        $value = $entry.Substring($separator + 1)
+        $lines += "      - name: $name"
+        $lines += "        value: $(ConvertTo-YamlSingleQuoted $value)"
+    }
+
+    $lines += @(
+        "      resources:",
+        "        cpu: $cpuValue",
+        "        memory: $Memory"
+    )
+
+    if ($PersistentStorage) {
+        $lines += @(
+            "      volumeMounts:",
+            "      - volumeName: minecraft-persist",
+            "        mountPath: $(ConvertTo-YamlSingleQuoted $PersistentMountPath)"
+        )
+    }
+
+    $lines += @(
+        "      probes:",
+        "      - type: Startup",
+        "        tcpSocket:",
+        "          port: $GamePort",
+        "        initialDelaySeconds: 60",
+        "        periodSeconds: 10",
+        "        timeoutSeconds: 5",
+        "        failureThreshold: 48",
+        "      - type: Readiness",
+        "        tcpSocket:",
+        "          port: $GamePort",
+        "        initialDelaySeconds: 60",
+        "        periodSeconds: 10",
+        "        timeoutSeconds: 5",
+        "        failureThreshold: 48",
+        "      - type: Liveness",
+        "        tcpSocket:",
+        "          port: $GamePort",
+        "        initialDelaySeconds: 60",
+        "        periodSeconds: 30",
+        "        timeoutSeconds: 5",
+        "        failureThreshold: 6",
+        "    scale:",
+        "      minReplicas: $MinReplicas",
+        "      maxReplicas: $MaxReplicas",
+        "    revisionSuffix: $RevisionSuffix"
+    )
+
+    if ($PersistentStorage) {
+        $lines += @(
+            "    volumes:",
+            "    - name: minecraft-persist",
+            "      storageName: $($PersistentStorage.environmentStorageName)",
+            "      storageType: AzureFile"
+        )
+    }
+
+    $directory = Split-Path -Parent $Path
+    if ($directory) {
+        New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    }
+    Set-Content -Path $Path -Value ($lines -join "`n") -Encoding utf8
+}
+
 function Ensure-ContainerAppsVnet() {
+    az provider register --namespace Microsoft.App --only-show-errors | Out-Null
     az provider register --namespace Microsoft.ContainerService --only-show-errors | Out-Null
 
     $vnetExists = Test-AzCommand @(
@@ -169,8 +405,15 @@ $envVars = @(
     "DAISY_MINECRAFT_EULA_ACCEPTED=true",
     "DAISY_MINECRAFT_MEMORY_MB=$MemoryMb",
     "DAISY_MINECRAFT_PORT=$GamePort",
-    "DAISY_MINECRAFT_SERVER_JAR_NAME=$ServerJarName"
+    "DAISY_MINECRAFT_SERVER_JAR_NAME=$ServerJarName",
+    "DAISY_MINECRAFT_INSTALL_BUNDLED_PLUGINS=true"
 )
+
+$persistentStorage = $null
+if (-not $SkipPersistentStorage) {
+    $persistentStorage = Ensure-PersistentStorage
+    $envVars += "DAISY_MINECRAFT_PERSIST_DIR=$PersistentMountPath"
+}
 
 if ($ServerJarUrl -or $ServerJarSha256) {
     if (-not $ServerJarUrl -or -not $ServerJarSha256) {
@@ -189,18 +432,7 @@ $appExists = Test-AzCommand @(
     "--resource-group", $ResourceGroup
 )
 
-if ($appExists) {
-    az containerapp update `
-        --name $ContainerAppName `
-        --resource-group $ResourceGroup `
-        --image $Image `
-        --cpu $Cpu `
-        --memory $Memory `
-        --min-replicas $MinReplicas `
-        --max-replicas $MaxReplicas `
-        --set-env-vars @envVars `
-        --only-show-errors | Out-Null
-} else {
+if (-not $appExists) {
     az containerapp create `
         --name $ContainerAppName `
         --resource-group $ResourceGroup `
@@ -218,13 +450,28 @@ if ($appExists) {
         --only-show-errors | Out-Null
 }
 
-az containerapp ingress enable `
+$environmentId = Az-Tsv @(
+    "containerapp", "env", "show",
+    "--name", $EnvironmentName,
+    "--resource-group", $ResourceGroup,
+    "--query", "id"
+)
+if (-not $environmentId) {
+    throw "Could not resolve Container Apps environment ID for '$EnvironmentName'."
+}
+
+$deploymentYamlPath = Join-Path (Join-Path (Get-Location) "build") "azure-containerapp"
+$deploymentYamlPath = Join-Path $deploymentYamlPath "$ContainerAppName.yaml"
+Write-ContainerAppYaml `
+    -Path $deploymentYamlPath `
+    -EnvironmentId $environmentId.Trim() `
+    -EnvVars $envVars `
+    -PersistentStorage $persistentStorage
+
+az containerapp update `
     --name $ContainerAppName `
     --resource-group $ResourceGroup `
-    --type external `
-    --transport tcp `
-    --target-port $GamePort `
-    --exposed-port $GamePort `
+    --yaml $deploymentYamlPath `
     --only-show-errors | Out-Null
 
 $fqdn = az containerapp show `
@@ -241,10 +488,24 @@ if (-not $fqdn) {
 $minecraftEndpoint = "${fqdn}:$GamePort"
 
 if (-not $SkipControlPlaneAppSetting) {
+    $controlPlaneSettings = @(
+        "DAISYMINECRAFT_MINECRAFT_ENDPOINT=$minecraftEndpoint",
+        "DAISYMINECRAFT_AZURE_RESOURCE_GROUP=$ResourceGroup",
+        "DAISYMINECRAFT_AZURE_CONTAINER_APP=$ContainerAppName",
+        "DAISYMINECRAFT_AZURE_CONTAINER_APPS_ENVIRONMENT=$EnvironmentName"
+    )
+    if ($persistentStorage) {
+        $controlPlaneSettings += @(
+            "DAISYMINECRAFT_PERSISTENT_STORAGE_ACCOUNT=$($persistentStorage.storageAccount)",
+            "DAISYMINECRAFT_PERSISTENT_FILE_SHARE=$($persistentStorage.fileShare)",
+            "DAISYMINECRAFT_PERSISTENT_MOUNT_PATH=$($persistentStorage.mountPath)"
+        )
+    }
+
     az webapp config appsettings set `
         --name $ControlPlaneAppName `
         --resource-group $ResourceGroup `
-        --settings "DAISYMINECRAFT_MINECRAFT_ENDPOINT=$minecraftEndpoint" `
+        --settings @controlPlaneSettings `
         --only-show-errors | Out-Null
 }
 
@@ -252,5 +513,8 @@ if (-not $SkipControlPlaneAppSetting) {
     containerApp = $ContainerAppName
     image = $Image
     minecraftEndpoint = $minecraftEndpoint
+    revisionSuffix = $RevisionSuffix
+    persistentStorage = $persistentStorage
+    deploymentYaml = $deploymentYamlPath
     controlPlaneAppSettingUpdated = (-not $SkipControlPlaneAppSetting)
-} | ConvertTo-Json
+} | ConvertTo-Json -Depth 5

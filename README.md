@@ -54,6 +54,7 @@ On `main`, CI validates and publishes the image as `ghcr.io/daisyquest/daisymine
 
 Azure Container Apps external TCP ingress requires an environment backed by a custom VNet. The deployment script creates/reuses a dedicated VNet and delegated infrastructure subnet before creating the server app.
 The default deployment keeps the Java heap below the container memory limit so Paper has native/headroom during plugin remapping and world startup. For production servers with bundled plugins, prefer at least `-Memory 4Gi -Cpu 2.0 -MemoryMb 3072`.
+The deployment script also creates/reuses an Azure Files share and registers it with the Container Apps environment. The share is mounted at `/mnt/daisy-persist` as a DaisyCloud persistence/snapshot backing path; do not mount Azure Files directly over Paper's active `/data` directory because Paper uses atomic config writes that Azure Files SMB can reject with `Operation not permitted`.
 
 After `az login`, deploy the server runtime to Azure Container Apps and wire the control plane to the resulting TCP endpoint with:
 
@@ -62,8 +63,16 @@ After `az login`, deploy the server runtime to Azure Container Apps and wire the
   -ResourceGroup <resource-group> `
   -Location <azure-region> `
   -EnvironmentName <vnet-backed-container-apps-environment> `
-  -ContainerAppName <minecraft-container-app>
+  -ContainerAppName <minecraft-container-app> `
+  -Memory 4Gi `
+  -Cpu 2.0 `
+  -MemoryMb 3072 `
+  -PersistentStorageAccountName <globally-unique-storage-account> `
+  -PersistentFileShareName <file-share-name> `
+  -PersistentStorageMountName <containerapps-environment-storage-name>
 ```
+
+The script updates these App Service settings for the control plane: `DAISYMINECRAFT_MINECRAFT_ENDPOINT`, `DAISYMINECRAFT_AZURE_RESOURCE_GROUP`, `DAISYMINECRAFT_AZURE_CONTAINER_APP`, `DAISYMINECRAFT_AZURE_CONTAINER_APPS_ENVIRONMENT`, `DAISYMINECRAFT_PERSISTENT_STORAGE_ACCOUNT`, `DAISYMINECRAFT_PERSISTENT_FILE_SHARE`, and `DAISYMINECRAFT_PERSISTENT_MOUNT_PATH`.
 
 ## Relationship To DaisyCloud
 
