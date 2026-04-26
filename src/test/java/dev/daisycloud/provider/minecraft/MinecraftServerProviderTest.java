@@ -277,6 +277,31 @@ class MinecraftServerProviderTest {
     }
 
     @Test
+    void nodeAgentExecutorStartsCustomImageWithImageEntrypoint() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().apply(context(Map.of(
+                "serverName", "runtime-image",
+                "minecraftVersion", "community-2026-04",
+                "serverType", "custom",
+                "eulaAccepted", "true",
+                "customServerImage", "registry.example.test/minecraft/community-pack:2026.04",
+                "customContentSupport", "plugins",
+                "selectedPlugins", "luckperms")));
+        assertTrue(response.success(), response.message());
+        InMemoryResourceRepository resources = repositoryWithDatabase(response.value());
+        RecordingRuntimeDriver driver = new RecordingRuntimeDriver();
+
+        MinecraftRuntimeExecutionResult result = new MinecraftNodeAgentExecutor(driver, new DaisyBaseConnector(resources))
+                .execute("runtime-request-custom-image", response.value());
+
+        assertTrue(result.success(), result.message());
+        assertEquals("Succeeded", result.attributes().get("provisioningState"));
+        assertEquals("custom-image", result.attributes().get("runtimeSource"));
+        assertEquals("registry.example.test/minecraft/community-pack:2026.04", driver.startedSpec.image());
+        assertEquals("", driver.startedSpec.command());
+        assertTrue(driver.operations.contains("start:mc-runtime-image"));
+    }
+
+    @Test
     void nodeAgentExecutorStopsContainerAndPreservesVolumeOnDelete() {
         ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().delete(context(Map.of(
                 "serverName", "runtime-delete",
@@ -612,6 +637,110 @@ class MinecraftServerProviderTest {
         assertTrue(response.success(), response.message());
         assertEquals("luckperms,geyser", response.value().get("selectedPlugins"));
         assertTrue(response.value().get("compatibilityReport").contains("2 plugins"));
+    }
+
+    @Test
+    void acceptsArbitraryCustomJarServerRuntime() {
+        Map<String, String> attributes = new LinkedHashMap<>();
+        attributes.put("serverName", "custom-node");
+        attributes.put("minecraftVersion", "1.20.1-mohist");
+        attributes.put("serverType", "custom");
+        attributes.put("eulaAccepted", "true");
+        attributes.put("memoryMb", "4096");
+        attributes.put("customServerKind", "mohist");
+        attributes.put("customServerJarUrl", "https://downloads.example.test/mohist/server.jar");
+        attributes.put("customServerJarSha256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        attributes.put("customServerJarName", "mohist.jar");
+        attributes.put("customServerCommand", "java -Xms4096M -Xmx4096M -jar mohist.jar nogui");
+        attributes.put("customContentSupport", "mods-and-plugins");
+        attributes.put("customModLoader", "forge");
+        attributes.put("selectedMods", "modrinth:jei");
+        attributes.put("selectedPlugins", "luckperms");
+        attributes.put("daisyCompanion", "enabled");
+
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().apply(context(attributes));
+
+        assertTrue(response.success(), response.message());
+        assertEquals("custom", response.value().get("serverType"));
+        assertEquals("custom-jar", response.value().get("runtimeSource"));
+        assertEquals("mohist", response.value().get("customServerKind"));
+        assertEquals("forge", response.value().get("modLoader"));
+        assertEquals("mods-and-plugins", response.value().get("customContentSupport"));
+        assertEquals("daisycloud/minecraft-custom-java:21", response.value().get("serverImage"));
+        assertEquals("java -Xms4096M -Xmx4096M -jar mohist.jar nogui", response.value().get("containerCommand"));
+        assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_RUNTIME_SOURCE=custom-jar"));
+        assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_CUSTOM_SERVER_JAR_NAME=mohist.jar"));
+        assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("customServerJarUrl=https://downloads.example.test/mohist/server.jar"));
+        assertTrue(response.value().get("startupFile:daisycloud-runtime.properties").contains("customServerCommand=java -Xms4096M -Xmx4096M -jar mohist.jar nogui"));
+        assertTrue(response.value().get("nodeAgentExecutionPlan").contains("fetch-custom-server-jar:https://downloads.example.test/mohist/server.jar=>mohist.jar#0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+        assertTrue(response.value().get("compatibilityReport").contains("custom server kind mohist"));
+        assertEquals("enabled", response.value().get("daisyCompanion"));
+        assertTrue(response.value().get("contentLockSummary").contains("mods=1"));
+        assertTrue(response.value().get("contentLockSummary").contains("plugins=1"));
+    }
+
+    @Test
+    void acceptsArbitraryCustomImageServerRuntimeWithImageEntrypoint() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().apply(context(Map.of(
+                "serverName", "image-node",
+                "minecraftVersion", "modded-2026-04",
+                "serverType", "custom",
+                "eulaAccepted", "true",
+                "customServerKind", "community-image",
+                "customServerImage", "registry.example.test/minecraft/community-pack:2026.04",
+                "customContentSupport", "plugins",
+                "selectedPlugins", "luckperms")));
+
+        assertTrue(response.success(), response.message());
+        assertEquals("custom-image", response.value().get("runtimeSource"));
+        assertEquals("registry.example.test/minecraft/community-pack:2026.04", response.value().get("serverImage"));
+        assertEquals("", response.value().get("containerCommand"));
+        assertTrue(response.value().get("containerEnvironment").contains("DAISY_MINECRAFT_RUNTIME_SOURCE=custom-image"));
+        assertFalse(response.value().get("nodeAgentExecutionPlan").contains("fetch-custom-server-jar"));
+        assertTrue(response.value().get("contentLockSummary").contains("plugins=1"));
+    }
+
+    @Test
+    void acceptsArbitraryCustomImageServerRuntimeWithNonJarCommand() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().apply(context(Map.of(
+                "serverName", "image-cmd",
+                "minecraftVersion", "proxy-stack",
+                "serverType", "custom",
+                "eulaAccepted", "true",
+                "customServerImage", "registry.example.test/minecraft/proxy-stack:latest",
+                "customServerCommand", "/opt/minecraft/start.sh --profile proxy")));
+
+        assertTrue(response.success(), response.message());
+        assertEquals("custom-image", response.value().get("runtimeSource"));
+        assertEquals("/opt/minecraft/start.sh --profile proxy", response.value().get("containerCommand"));
+        assertTrue(response.value().get("startupFile:daisycloud-runtime.properties")
+                .contains("customServerCommand=/opt/minecraft/start.sh --profile proxy"));
+    }
+
+    @Test
+    void rejectsCustomJarRuntimeWithoutSha256() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().validate(context(Map.of(
+                "serverName", "custom-node",
+                "minecraftVersion", "1.20.1-mohist",
+                "serverType", "custom",
+                "eulaAccepted", "true",
+                "customServerJarUrl", "https://downloads.example.test/mohist/server.jar")));
+
+        assertFalse(response.success());
+        assertEquals("customServerJarSha256 is required when customServerJarUrl is set", response.message());
+    }
+
+    @Test
+    void rejectsCustomRuntimeFieldsOnManagedServerTypes() {
+        ProviderResponse<Map<String, String>> response = new MinecraftServerProvider().validate(context(Map.of(
+                "serverName", "paper-custom",
+                "minecraftVersion", "1.21.11",
+                "serverType", "paper",
+                "eulaAccepted", "true",
+                "customServerImage", "registry.example.test/minecraft/custom:latest")));
+
+        assertFalse(response.success());
+        assertEquals("custom server runtime fields require serverType=custom", response.message());
     }
 
     @Test

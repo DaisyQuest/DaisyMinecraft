@@ -3,6 +3,7 @@ package dev.daisycloud.provider.minecraft;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -41,17 +42,26 @@ public record MinecraftNodeAgentTask(
             String requestId,
             Map<String, String> planned,
             MinecraftContainerManifest manifest) {
-        List<String> steps = List.of(
+        List<String> steps = new ArrayList<>(List.of(
                 "pull-image:" + manifest.image(),
                 "ensure-volume:" + joinMap(manifest.volumes()),
                 "prepare-daisybase:" + planned.getOrDefault("databaseResourceId", "disabled"),
-                "resolve-marketplace-content:" + planned.getOrDefault("marketplaceMode", "offline"),
+                "resolve-marketplace-content:" + planned.getOrDefault("marketplaceMode", "offline")));
+        if (!planned.getOrDefault("customServerJarUrl", "").isBlank()) {
+            steps.add("fetch-custom-server-jar:"
+                    + planned.getOrDefault("customServerJarUrl", "")
+                    + "=>"
+                    + planned.getOrDefault("customServerJarName", "server.jar")
+                    + "#"
+                    + planned.getOrDefault("customServerJarSha256", ""));
+        }
+        steps.addAll(List.of(
                 "write-startup-files:" + String.join(",", manifest.startupFiles().files().keySet()),
                 "install-bundled-addons:" + planned.getOrDefault("bundledAddonPlan", "disabled"),
                 "bind-ports:" + joinMap(manifest.portBindings()),
                 "activate-instance:" + planned.getOrDefault("activeInstance", "primary"),
                 "start-container:" + manifest.serviceName(),
-                "verify-health:" + String.join(",", manifest.healthChecks().keySet()));
+                "verify-health:" + String.join(",", manifest.healthChecks().keySet())));
         return task(
                 requestId,
                 planned,
@@ -117,6 +127,9 @@ public record MinecraftNodeAgentTask(
         evidence.put("resourceId", planned.getOrDefault("resourceId", ""));
         evidence.put("serviceName", manifest.serviceName());
         evidence.put("image", manifest.image());
+        evidence.put("runtimeSource", planned.getOrDefault("runtimeSource", ""));
+        evidence.put("customServerKind", planned.getOrDefault("customServerKind", ""));
+        evidence.put("customServerJarSha256", planned.getOrDefault("customServerJarSha256", ""));
         evidence.put("contentLockDigest", planned.getOrDefault("contentLockDigest", ""));
         evidence.put("databaseResourceId", planned.getOrDefault("databaseResourceId", ""));
         evidence.put("marketplaceMode", planned.getOrDefault("marketplaceMode", ""));

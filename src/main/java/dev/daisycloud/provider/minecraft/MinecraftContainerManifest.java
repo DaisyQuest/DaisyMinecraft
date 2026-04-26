@@ -21,7 +21,7 @@ public record MinecraftContainerManifest(
         manifestVersion = requireText(manifestVersion, "manifestVersion");
         serviceName = requireText(serviceName, "serviceName");
         image = requireText(image, "image");
-        command = requireText(command, "command");
+        command = Objects.requireNonNull(command, "command must not be null").trim();
         environment = copyMap(environment, "environment");
         portBindings = copyMap(portBindings, "portBindings");
         volumes = copyMap(volumes, "volumes");
@@ -51,6 +51,14 @@ public record MinecraftContainerManifest(
         environment.put("DAISY_MINECRAFT_VERSION", requirePlanned(planned, "minecraftVersion"));
         environment.put("DAISY_MINECRAFT_MEMORY_MB", memoryMb);
         environment.put("DAISY_MINECRAFT_JAVA_VERSION", requirePlanned(planned, "javaVersion"));
+        environment.put("DAISY_MINECRAFT_RUNTIME_SOURCE", requirePlanned(planned, "runtimeSource"));
+        environment.put("DAISY_MINECRAFT_CUSTOM_SERVER_KIND", planned.getOrDefault("customServerKind", ""));
+        environment.put("DAISY_MINECRAFT_CUSTOM_SERVER_IMAGE", planned.getOrDefault("customServerImage", ""));
+        environment.put("DAISY_MINECRAFT_CUSTOM_SERVER_JAR_URL", planned.getOrDefault("customServerJarUrl", ""));
+        environment.put("DAISY_MINECRAFT_CUSTOM_SERVER_JAR_SHA256", planned.getOrDefault("customServerJarSha256", ""));
+        environment.put("DAISY_MINECRAFT_CUSTOM_SERVER_JAR_NAME", planned.getOrDefault("customServerJarName", "server.jar"));
+        environment.put("DAISY_MINECRAFT_CUSTOM_CONTENT_SUPPORT", planned.getOrDefault("customContentSupport", "none"));
+        environment.put("DAISY_MINECRAFT_CUSTOM_MOD_LOADER", planned.getOrDefault("customModLoader", "none"));
         environment.put("DAISY_MINECRAFT_RESOURCE_ID", planned.getOrDefault("resourceId", ""));
         environment.put("DAISY_MINECRAFT_CONTENT_SOURCE", requirePlanned(planned, "modSource"));
         environment.put("DAISY_MINECRAFT_PANEL_ACCESS", requirePlanned(planned, "panelAccess"));
@@ -138,15 +146,23 @@ public record MinecraftContainerManifest(
     }
 
     private static String commandFor(String edition, Map<String, String> planned) {
+        String customCommand = planned.getOrDefault("customServerCommand", "").trim();
+        if (!customCommand.isBlank()) {
+            return customCommand;
+        }
+        if ("custom-image".equals(planned.getOrDefault("runtimeSource", ""))) {
+            return "";
+        }
         if ("bedrock".equals(edition)) {
             return "./bedrock_server";
         }
         String jvmArgs = planned.getOrDefault("jvmArgs", "").trim();
         String memoryMb = requirePlanned(planned, "memoryMb");
+        String jarName = planned.getOrDefault("customServerJarName", "server.jar");
         String prefix = jvmArgs.isBlank()
                 ? "java -Xms" + memoryMb + "M -Xmx" + memoryMb + "M"
                 : "java " + jvmArgs;
-        return prefix + " -jar server.jar nogui";
+        return prefix + " -jar " + jarName + " nogui";
     }
 
     private static Map<String, String> copyMap(Map<String, String> values, String name) {

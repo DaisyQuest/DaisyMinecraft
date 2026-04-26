@@ -104,7 +104,13 @@ public final class DaisyMinecraftApp {
         values.put("provider", "DaisyCloud.Minecraft");
         values.put("resourceType", "servers");
         values.put("adminPanel", "available");
-        values.put("serverBrowser", "opt-in");
+        values.put("serverBrowser", "opt-in-any-server");
+        values.put("controlPlaneUrl", controlPlaneUrl());
+        values.put("minecraftIngressState", minecraftEndpoint() == null ? "not-deployed" : "ready");
+        values.put("minecraftEndpoint", Objects.toString(minecraftEndpoint(), ""));
+        values.put("minecraftIngressReason", minecraftEndpoint() == null
+                ? "Azure App Service is serving the HTTP control plane only"
+                : "Minecraft TCP endpoint configured");
         values.put("companionPlugin", "Daisy");
         values.put("timestamp", Instant.now().toString());
         StringBuilder json = new StringBuilder("{");
@@ -117,32 +123,74 @@ public final class DaisyMinecraftApp {
         return json.append('}').toString();
     }
 
-    private static String serverBrowserJson() {
+    static String serverBrowserJson() {
+        String minecraftEndpoint = minecraftEndpoint();
+        boolean connectable = minecraftEndpoint != null;
+        String endpointJson = connectable ? "\"" + json(minecraftEndpoint) + "\"" : "null";
+        String ingressState = connectable ? "ready" : "not-deployed";
+        String ingressReason = connectable
+                ? "Minecraft TCP ingress endpoint is configured."
+                : "The Azure App Service deployment exposes HTTPS control-plane routes only. Minecraft TCP/UDP ingress must be deployed through the server container on a TCP-capable host before clients can connect.";
+        String survivalStatus = connectable ? "online-endpoint-configured" : "not-connectable";
+        String survivalConnectable = Boolean.toString(connectable);
+        String blockerLine = connectable ? "" : """
+                              "connectivityBlocker": "minecraft-ingress-not-deployed",
+                """;
         return """
                 {
                   "listingMode": "opt-in",
-                  "publicEndpointPattern": "daisyquest.azurewebsites.net:${port}",
+                  "controlPlaneUrl": "${controlPlaneUrl}",
+                  "publicEndpointPattern": ${publicEndpointPattern},
+                  "minecraftIngressState": "${minecraftIngressState}",
+                  "minecraftIngressReason": "${minecraftIngressReason}",
                   "features": [
                     "server-listings",
+                    "arbitrary-server-listings",
+                    "external-hostname-and-port",
                     "vote-collection",
                     "admin-panel-health",
                     "marketplace-readiness",
-                    "runtime-driver-readiness"
+                    "runtime-driver-readiness",
+                    "server-container-package"
                   ],
                   "sampleListings": [
                     {
                       "name": "Survival Core",
                       "edition": "java",
                       "version": "1.21.11",
-                      "status": "awaiting-runtime-binding",
+                      "status": "${survivalStatus}",
+                      "connectable": ${survivalConnectable},
+${blockerLine}                      "host": ${survivalHost},
+                      "votes": 0
+                    },
+                    {
+                      "name": "Community SMP",
+                      "edition": "java",
+                      "version": "custom",
+                      "status": "external-server-opt-in",
+                      "host": "play.example.net",
+                      "port": 25565,
                       "votes": 0
                     }
                   ]
                 }
-                """.replace("${port}", firstNonBlank(System.getenv("PORT"), "25565")).trim();
+                """
+                .replace("${controlPlaneUrl}", json(controlPlaneUrl()))
+                .replace("${publicEndpointPattern}", endpointJson)
+                .replace("${minecraftIngressState}", ingressState)
+                .replace("${minecraftIngressReason}", json(ingressReason))
+                .replace("${survivalStatus}", survivalStatus)
+                .replace("${survivalConnectable}", survivalConnectable)
+                .replace("${blockerLine}", blockerLine)
+                .replace("${survivalHost}", endpointJson)
+                .trim();
     }
 
     private static String portalHtml() {
+        String gameIngressLabel = minecraftEndpoint() == null ? "not deployed" : minecraftEndpoint();
+        String gameIngressCopy = minecraftEndpoint() == null
+                ? "Minecraft client traffic is not served by this web app; deploy the server container behind TCP/UDP ingress."
+                : "Minecraft client traffic is configured at " + minecraftEndpoint() + ".";
         return """
                 <!doctype html>
                 <html lang="en">
@@ -273,14 +321,14 @@ public final class DaisyMinecraftApp {
                       <div class="eyebrow">DaisyCloud Minecraft Provider</div>
                       <h1>Control plane online.</h1>
                       <p class="lead">
-                        DaisyMinecraft is booted as an Azure Java App Service. This runtime surface exposes health,
-                        provider status, and the opt-in public server browser contract while the container runtime
-                        driver handles actual Minecraft server processes.
+                        DaisyMinecraft is booted as an Azure Java App Service control plane. This deployment exposes
+                        health, provider status, and opt-in server-browser contracts. ${gameIngressCopy}
                       </p>
                       <div class="status">
                         <span class="pill"><b>Health</b> /health</span>
                         <span class="pill"><b>Status</b> /api/status</span>
                         <span class="pill"><b>Browser</b> /api/server-browser</span>
+                        <span class="pill"><b>Game ingress</b> ${gameIngressLabel}</span>
                         <span class="pill"><b>Companion</b> Daisy dog plugin bundled</span>
                       </div>
                     </section>
@@ -295,13 +343,15 @@ public final class DaisyMinecraftApp {
                       </article>
                       <article class="card">
                         <strong>Browser</strong>
-                        <span>Opt-in public listings and vote collection designed for DaisyCloud server owners.</span>
+                        <span>Opt-in public listings and vote collection. DaisyCloud-hosted listings stay marked not-connectable until TCP/UDP ingress is active.</span>
                       </article>
                     </section>
                   </main>
                 </body>
                 </html>
-                """;
+                """
+                .replace("${gameIngressCopy}", html(gameIngressCopy))
+                .replace("${gameIngressLabel}", html(gameIngressLabel));
     }
 
     private static String firstNonBlank(String... values) {
@@ -311,6 +361,41 @@ public final class DaisyMinecraftApp {
             }
         }
         throw new IllegalArgumentException("at least one value must be non-blank");
+    }
+
+    private static String controlPlaneUrl() {
+        String hostname = firstNonBlank(
+                System.getenv("WEBSITE_HOSTNAME"),
+                System.getenv("DAISYMINECRAFT_PUBLIC_HOSTNAME"),
+                "daisyminecraft.azurewebsites.net");
+        if (hostname.startsWith("http://") || hostname.startsWith("https://")) {
+            return hostname;
+        }
+        return "https://" + hostname;
+    }
+
+    private static String minecraftEndpoint() {
+        return firstNonBlankOrNull(
+                System.getProperty("daisyminecraft.minecraftEndpoint"),
+                System.getenv("DAISYMINECRAFT_MINECRAFT_ENDPOINT"),
+                System.getenv("MINECRAFT_ENDPOINT"));
+    }
+
+    private static String firstNonBlankOrNull(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private static String html(String value) {
+        return Objects.toString(value, "")
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private static String json(String value) {

@@ -15,6 +15,10 @@ jobs:
     permissions:
       contents: read #This is required for actions/checkout
       actions: read #This is required when using github.token for artifact metadata
+      packages: write #This publishes the Minecraft server runtime image to GHCR
+
+    env:
+      MINECRAFT_SERVER_IMAGE: ghcr.io/daisyquest/daisyminecraft-server
 
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +113,24 @@ jobs:
           -Pdaisyminecraft.useDaisyCloudArtifacts=true
           -Pdaisyminecraft.daisyCloudArtifactsDir="${GITHUB_WORKSPACE}/build/daisycloud-artifacts"
 
+      - name: Validate Minecraft server container image
+        run: >
+          docker build --pull
+          -t "${MINECRAFT_SERVER_IMAGE}:${GITHUB_SHA}"
+          -t "${MINECRAFT_SERVER_IMAGE}:latest"
+          src/main/container
+
+      - name: Publish Minecraft server container image
+        if: github.ref == 'refs/heads/main'
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker push "${MINECRAFT_SERVER_IMAGE}:${GITHUB_SHA}"
+          docker push "${MINECRAFT_SERVER_IMAGE}:latest"
+
       - name: Stage Azure deployment package
         run: |
           set -euo pipefail
@@ -137,6 +159,12 @@ jobs:
         with:
           name: java-app
           path: '${{ github.workspace }}/build/azure-package/DaisyMinecraft.jar'
+
+      - name: Upload Minecraft server container context
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-server-container
+          path: '${{ github.workspace }}/build/distributions/daisyminecraft-server-container-*.zip'
 
   deploy:
     runs-on: ubuntu-latest

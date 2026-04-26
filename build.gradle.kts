@@ -1,5 +1,6 @@
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.tasks.Copy
+import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.tasks.Jar
 import java.io.File
@@ -91,6 +92,51 @@ tasks.withType<Test>().configureEach {
 
 tasks.named("processResources") {
     dependsOn(copyBundledAddons)
+}
+
+val minecraftContainerDir = layout.projectDirectory.dir("src/main/container")
+
+val verifyMinecraftContainer = tasks.register("verifyMinecraftContainer") {
+    val dockerfile = minecraftContainerDir.file("Dockerfile")
+    val entrypoint = minecraftContainerDir.file("daisyminecraft-entrypoint.sh")
+    val healthcheck = minecraftContainerDir.file("daisyminecraft-healthcheck.sh")
+    inputs.files(dockerfile, entrypoint, healthcheck)
+    doLast {
+        val dockerfileText = dockerfile.asFile.readText()
+        val entrypointText = entrypoint.asFile.readText()
+        val healthcheckText = healthcheck.asFile.readText()
+        require("ENTRYPOINT" in dockerfileText && "daisyminecraft-entrypoint" in dockerfileText) {
+            "Minecraft container Dockerfile must configure the DaisyMinecraft entrypoint."
+        }
+        require("HEALTHCHECK" in dockerfileText && "25565/tcp" in dockerfileText && "25565/udp" in dockerfileText) {
+            "Minecraft container Dockerfile must expose and healthcheck the game endpoint."
+        }
+        require("EULA" in entrypointText && "sha256sum -c" in entrypointText && "curl --fail" in entrypointText) {
+            "Minecraft entrypoint must enforce EULA and verified custom jar downloads."
+        }
+        require("DAISY_MINECRAFT_CUSTOM_SERVER_COMMAND" in entrypointText && "java" in entrypointText) {
+            "Minecraft entrypoint must support custom commands and default Java jar startup."
+        }
+        require("nc -z" in healthcheckText || "pgrep" in healthcheckText) {
+            "Minecraft healthcheck must verify port or server process health."
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyMinecraftContainer)
+}
+
+tasks.register<Zip>("packageMinecraftContainer") {
+    dependsOn(verifyMinecraftContainer)
+    from(minecraftContainerDir)
+    archiveBaseName.set("daisyminecraft-server-container")
+    archiveVersion.set(project.version.toString())
+    destinationDirectory.set(layout.buildDirectory.dir("distributions"))
+}
+
+tasks.named("assemble") {
+    dependsOn("packageMinecraftContainer")
 }
 
 tasks.named<Jar>("sourcesJar") {

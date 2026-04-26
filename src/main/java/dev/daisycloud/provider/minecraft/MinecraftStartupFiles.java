@@ -52,6 +52,15 @@ public record MinecraftStartupFiles(Map<String, String> files) {
         properties.put("resourceId", planned.getOrDefault("resourceId", ""));
         properties.put("containerRuntime", value(planned, "containerRuntime"));
         properties.put("serverImage", value(planned, "serverImage"));
+        properties.put("runtimeSource", value(planned, "runtimeSource"));
+        properties.put("customServerKind", value(planned, "customServerKind"));
+        properties.put("customServerImage", value(planned, "customServerImage"));
+        properties.put("customServerJarUrl", value(planned, "customServerJarUrl"));
+        properties.put("customServerJarSha256", value(planned, "customServerJarSha256"));
+        properties.put("customServerJarName", value(planned, "customServerJarName"));
+        properties.put("customServerCommand", value(planned, "customServerCommand"));
+        properties.put("customContentSupport", value(planned, "customContentSupport"));
+        properties.put("customModLoader", value(planned, "customModLoader"));
         properties.put("backupPolicy", value(planned, "backupPolicy"));
         properties.put("backupPolicySchema", value(planned, "backupPolicySchema"));
         properties.put("backupScope", value(planned, "backupScope"));

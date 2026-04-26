@@ -1,0 +1,2 @@
+src/main/container/Dockerfile text eol=lf
+src/main/container/*.sh text eol=lf

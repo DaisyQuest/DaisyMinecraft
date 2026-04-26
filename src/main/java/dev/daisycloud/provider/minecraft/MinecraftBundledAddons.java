@@ -33,9 +33,19 @@ public final class MinecraftBundledAddons {
     }
 
     public static void validateDaisyCompanion(String mode, String serverType) {
+        validateDaisyCompanion(mode, serverType, "none");
+    }
+
+    public static void validateDaisyCompanion(String mode, String serverType, String customContentSupport) {
+        boolean pluginCompatible = PLUGIN_SERVER_TYPES.contains(requireText(serverType, "serverType"))
+                || ("custom".equals(serverType)
+                && Set.of("plugins", "mods-and-plugins").contains(requireText(customContentSupport, "customContentSupport")));
         if ("enabled".equals(requireText(mode, "daisyCompanion"))
-                && !PLUGIN_SERVER_TYPES.contains(requireText(serverType, "serverType"))) {
-            throw new IllegalArgumentException("daisyCompanion=enabled requires serverType paper, spigot, or purpur");
+                && !pluginCompatible) {
+            if (!"custom".equals(serverType)) {
+                throw new IllegalArgumentException("daisyCompanion=enabled requires serverType paper, spigot, or purpur");
+            }
+            throw new IllegalArgumentException("daisyCompanion=enabled requires a plugin-compatible server type");
         }
     }
 

@@ -18,7 +18,7 @@ public record MinecraftRuntimeContainerSpec(
     public MinecraftRuntimeContainerSpec {
         serviceName = requireText(serviceName, "serviceName");
         image = requireText(image, "image");
-        command = requireText(command, "command");
+        command = Objects.requireNonNull(command, "command must not be null").trim();
         environment = copyMap(environment, "environment");
         portBindings = copyMap(portBindings, "portBindings");
         volumes = copyMap(volumes, "volumes");

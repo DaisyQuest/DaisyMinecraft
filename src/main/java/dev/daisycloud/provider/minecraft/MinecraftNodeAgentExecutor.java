@@ -150,7 +150,7 @@ public final class MinecraftNodeAgentExecutor {
         return new MinecraftRuntimeContainerSpec(
                 require(attributes, "containerServiceName"),
                 require(attributes, "containerImage"),
-                require(attributes, "containerCommand"),
+                attributes.getOrDefault("containerCommand", ""),
                 parseMap(require(attributes, "containerEnvironment")),
                 parseMap(require(attributes, "containerPortBindings")),
                 parseMap(require(attributes, "containerVolumes")),

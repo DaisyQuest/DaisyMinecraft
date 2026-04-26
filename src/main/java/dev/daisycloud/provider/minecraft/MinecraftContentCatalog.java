@@ -35,12 +35,12 @@ public final class MinecraftContentCatalog {
                         Set.of("*"),
                         List.of(new Dependency("mod", "modrinth", "sodium")),
                         List.of()),
-                plugin("plugin-catalog", "luckperms", Set.of("paper", "spigot", "purpur")),
-                plugin("plugin-catalog", "geyser", Set.of("paper", "spigot", "purpur")),
-                plugin("plugin-catalog", "floodgate", Set.of("paper", "spigot", "purpur")),
-                plugin("spigotmc", "luckperms", Set.of("paper", "spigot", "purpur")),
-                plugin("spigotmc", "geyser", Set.of("paper", "spigot", "purpur")),
-                plugin("spigotmc", "floodgate", Set.of("paper", "spigot", "purpur"))));
+                plugin("plugin-catalog", "luckperms", Set.of("paper", "spigot", "purpur", "custom")),
+                plugin("plugin-catalog", "geyser", Set.of("paper", "spigot", "purpur", "custom")),
+                plugin("plugin-catalog", "floodgate", Set.of("paper", "spigot", "purpur", "custom")),
+                plugin("spigotmc", "luckperms", Set.of("paper", "spigot", "purpur", "custom")),
+                plugin("spigotmc", "geyser", Set.of("paper", "spigot", "purpur", "custom")),
+                plugin("spigotmc", "floodgate", Set.of("paper", "spigot", "purpur", "custom"))));
     }
 
     public MinecraftContentResolution resolve(

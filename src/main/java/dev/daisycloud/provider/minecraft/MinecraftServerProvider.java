@@ -6,6 +6,8 @@ import dev.daisycloud.provider.spi.ProviderRequestContext;
 import dev.daisycloud.provider.spi.ProviderResponse;
 import dev.daisycloud.provider.spi.ResourceProvider;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,12 +21,16 @@ import java.util.stream.Collectors;
 public final class MinecraftServerProvider implements ResourceProvider {
     private static final Pattern DNS_TOKEN = Pattern.compile("[a-z][a-z0-9-]{2,62}");
     private static final Pattern RESOURCE_TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}");
+    private static final Pattern IMAGE_REFERENCE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}");
+    private static final Pattern SAFE_FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+    private static final Pattern SHA256 = Pattern.compile("[a-fA-F0-9]{64}");
     private static final Pattern VERSION = Pattern.compile("(latest|stable|\\d+\\.\\d+(\\.\\d+)?)");
     private static final Set<String> EDITIONS = Set.of("java", "bedrock");
     private static final Set<String> SERVER_TYPES = Set.of(
-            "vanilla", "paper", "spigot", "purpur", "forge", "fabric", "quilt", "neoforge", "bedrock", "pocketmine");
+            "vanilla", "paper", "spigot", "purpur", "forge", "fabric", "quilt", "neoforge", "bedrock", "pocketmine", "custom");
     private static final Set<String> MOD_SERVER_TYPES = Set.of("forge", "fabric", "quilt", "neoforge");
     private static final Set<String> PLUGIN_SERVER_TYPES = Set.of("paper", "spigot", "purpur");
+    private static final Set<String> CUSTOM_CONTENT_SUPPORT = Set.of("none", "mods", "plugins", "mods-and-plugins");
     private static final Set<String> MOD_SOURCES = Set.of("none", "modrinth", "curseforge", "custom", "ftb", "technic", "atlauncher");
     private static final Set<String> ACCESS_MODES = Set.of("public", "internal", "disabled");
     private static final Set<String> ENABLED_MODES = Set.of("enabled", "disabled");
@@ -263,6 +269,15 @@ public final class MinecraftServerProvider implements ResourceProvider {
             String javaVersion,
             String jvmArgs,
             String restartSchedule,
+            String runtimeSource,
+            String customServerKind,
+            String customServerImage,
+            String customServerJarUrl,
+            String customServerJarSha256,
+            String customServerJarName,
+            String customServerCommand,
+            String customContentSupport,
+            String customModLoader,
             String databaseMode,
             String databaseResourceId,
             String databaseName,
@@ -289,13 +304,49 @@ public final class MinecraftServerProvider implements ResourceProvider {
 
             String edition = enumValue(optional(attributes, "edition", "java"), EDITIONS, "edition");
             String minecraftVersion = required(attributes, "minecraftVersion");
-            if (!VERSION.matcher(minecraftVersion).matches()) {
+            boolean customServerType = "custom".equals(optional(attributes, "serverType", ""));
+            if (customServerType && !RESOURCE_TOKEN.matcher(minecraftVersion).matches()) {
+                throw new IllegalArgumentException("minecraftVersion must be a safe version token when serverType=custom");
+            }
+            if (!customServerType && !VERSION.matcher(minecraftVersion).matches()) {
                 throw new IllegalArgumentException("minecraftVersion must be latest, stable, or a numeric Minecraft version");
             }
             String serverType = enumValue(optional(attributes, "serverType", edition.equals("bedrock") ? "bedrock" : "paper"),
                     SERVER_TYPES,
                     "serverType");
+            boolean customServer = "custom".equals(serverType);
             validateEditionCompatibility(edition, serverType);
+
+            String requestedCustomServerKind = optional(attributes, "customServerKind", "");
+            String customServerKind = customServer
+                    ? safeToken(requestedCustomServerKind.isBlank() ? "custom" : requestedCustomServerKind, "customServerKind")
+                    : safeText(requestedCustomServerKind, "customServerKind", 128);
+            String customServerImage = safeImageReference(optional(attributes, "customServerImage", ""), "customServerImage");
+            String customServerJarUrl = safeArtifactUrl(optional(attributes, "customServerJarUrl", ""), "customServerJarUrl");
+            String customServerJarSha256 = safeSha256(optional(attributes, "customServerJarSha256", ""), "customServerJarSha256");
+            String customServerJarName = customServer
+                    ? safeJarName(optional(attributes, "customServerJarName", "server.jar"), "customServerJarName")
+                    : "server.jar";
+            String customServerCommand = safeCommand(optional(attributes, "customServerCommand", ""), "customServerCommand");
+            String customContentSupport = enumValue(optional(attributes,
+                            "customContentSupport",
+                            customServer ? "none" : "none"),
+                    CUSTOM_CONTENT_SUPPORT,
+                    "customContentSupport");
+            String customModLoader = safeToken(optional(attributes,
+                            "customModLoader",
+                            customServer && customContentSupport.contains("mods") ? "custom" : "none"),
+                    "customModLoader");
+            validateCustomRuntime(
+                    serverType,
+                    customServerKind,
+                    customServerImage,
+                    customServerJarUrl,
+                    customServerJarSha256,
+                    customServerJarName,
+                    customServerCommand,
+                    customContentSupport,
+                    customModLoader);
 
             List<String> selectedMods = tokenList(attributes.get("selectedMods"), "selectedMods");
             List<String> selectedPlugins = tokenList(attributes.get("selectedPlugins"), "selectedPlugins");
@@ -306,13 +357,13 @@ public final class MinecraftServerProvider implements ResourceProvider {
             String modSource = enumValue(optional(attributes, "modSource", defaultModSource(modpackId, selectedMods)),
                     MOD_SOURCES,
                     "modSource");
-            validateContentSelection(serverType, modSource, modpackId, selectedMods, selectedPlugins);
+            validateContentSelection(serverType, customContentSupport, modSource, modpackId, selectedMods, selectedPlugins);
             String daisyCompanion = enumValue(optional(attributes,
                             "daisyCompanion",
-                            MinecraftBundledAddons.defaultDaisyCompanionMode(serverType)),
+                            customServer ? "disabled" : MinecraftBundledAddons.defaultDaisyCompanionMode(serverType)),
                     ENABLED_MODES,
                     "daisyCompanion");
-            MinecraftBundledAddons.validateDaisyCompanion(daisyCompanion, serverType);
+            MinecraftBundledAddons.validateDaisyCompanion(daisyCompanion, serverType, customContentSupport);
 
             int memoryMb = boundedInt(optional(attributes, "memoryMb", defaultMemoryMb(modpackId, selectedMods)),
                     "memoryMb", 512, 262_144);
@@ -373,6 +424,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             }
             String jvmArgs = safeText(optional(attributes, "jvmArgs", ""), "jvmArgs", 1_200);
             String restartSchedule = safeText(optional(attributes, "restartSchedule", "0 5 * * *"), "restartSchedule", 120);
+            String runtimeSource = customRuntimeSource(serverType, customServerImage, customServerJarUrl);
 
             String databaseMode = enumValue(optional(attributes, "databaseMode", "managed"), DATABASE_MODES, "databaseMode");
             String databaseResourceId = optional(attributes, "databaseResourceId", "");
@@ -467,6 +519,15 @@ public final class MinecraftServerProvider implements ResourceProvider {
                     javaVersion,
                     jvmArgs,
                     restartSchedule,
+                    runtimeSource,
+                    customServerKind,
+                    customServerImage,
+                    customServerJarUrl,
+                    customServerJarSha256,
+                    customServerJarName,
+                    customServerCommand,
+                    customContentSupport,
+                    customModLoader,
                     databaseMode,
                     databaseResourceId,
                     databaseName,
@@ -493,7 +554,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             planned.put("edition", edition);
             planned.put("minecraftVersion", minecraftVersion);
             planned.put("serverType", serverType);
-            planned.put("modLoader", modLoader(serverType));
+            planned.put("modLoader", modLoader(serverType, customModLoader, customContentSupport));
             planned.put("modSource", modSource);
             planned.put("modpackId", modpackId);
             planned.put("selectedMods", String.join(",", selectedMods));
@@ -532,8 +593,17 @@ public final class MinecraftServerProvider implements ResourceProvider {
             planned.put("javaVersion", javaVersion);
             planned.put("jvmArgs", jvmArgs);
             planned.put("restartSchedule", restartSchedule);
+            planned.put("runtimeSource", runtimeSource);
+            planned.put("customServerKind", customServerKind);
+            planned.put("customServerImage", customServerImage);
+            planned.put("customServerJarUrl", customServerJarUrl);
+            planned.put("customServerJarSha256", customServerJarSha256);
+            planned.put("customServerJarName", customServerJarName);
+            planned.put("customServerCommand", customServerCommand);
+            planned.put("customContentSupport", customContentSupport);
+            planned.put("customModLoader", customModLoader);
             planned.put("containerRuntime", "DaisyCloud.OpenAppServiceContainer");
-            planned.put("serverImage", "daisycloud/minecraft-" + serverType + ":" + minecraftVersion);
+            planned.put("serverImage", serverImage(serverType, minecraftVersion, javaVersion, customServerImage));
             planned.put("dataVolume", "daisycloud-mc-" + serverName);
             planned.put("serverEndpoint", serverEndpoint(serverName, region, port, networkMode));
             planned.put("panelUrl", "enabled".equals(adminPanel)
@@ -562,7 +632,7 @@ public final class MinecraftServerProvider implements ResourceProvider {
             planned.putAll(MinecraftAdminUxProfile.fromPlannedAttributes(planned).toProviderAttributes());
             MinecraftContentLock contentLock = MinecraftContentLock.fromPlannedAttributes(planned);
             planned.putAll(contentLock.toProviderAttributes());
-            planned.put("resourceRecommendation", resourceRecommendation(modpackId, selectedMods));
+            planned.put("resourceRecommendation", resourceRecommendation(serverType, modpackId, selectedMods));
             planned.put("compatibilityReport", compatibilityReport());
             planned.put("deploymentEvidence",
                     "EULA accepted;Runtime profile captured;Admin panel policy captured;Mod selection locked;"
@@ -575,11 +645,16 @@ public final class MinecraftServerProvider implements ResourceProvider {
         }
 
         private String compatibilityReport() {
+            if ("custom".equals(serverType)) {
+                return "custom server kind " + customServerKind
+                        + " planned from " + runtimeSource
+                        + " with contentSupport=" + customContentSupport;
+            }
             if (!modpackId.isBlank()) {
                 return "modpack " + modpackId + " resolved from " + modSource + " for " + serverType;
             }
             if (!selectedMods.isEmpty()) {
-                return selectedMods.size() + " mods resolved for " + modLoader(serverType);
+                return selectedMods.size() + " mods resolved for " + modLoader(serverType, customModLoader, customContentSupport);
             }
             if (!selectedPlugins.isEmpty()) {
                 return selectedPlugins.size() + " plugins resolved for " + serverType;
@@ -589,6 +664,9 @@ public final class MinecraftServerProvider implements ResourceProvider {
     }
 
     private static void validateEditionCompatibility(String edition, String serverType) {
+        if ("custom".equals(serverType)) {
+            return;
+        }
         if ("bedrock".equals(edition) && !Set.of("bedrock", "pocketmine").contains(serverType)) {
             throw new IllegalArgumentException("bedrock edition requires serverType bedrock or pocketmine");
         }
@@ -599,25 +677,77 @@ public final class MinecraftServerProvider implements ResourceProvider {
 
     private static void validateContentSelection(
             String serverType,
+            String customContentSupport,
             String modSource,
             String modpackId,
             List<String> selectedMods,
             List<String> selectedPlugins) {
-        if (!selectedMods.isEmpty() && !MOD_SERVER_TYPES.contains(serverType)) {
+        if (!selectedMods.isEmpty() && !supportsMods(serverType, customContentSupport)) {
             throw new IllegalArgumentException("selectedMods require a Forge, Fabric, Quilt, or NeoForge server type");
         }
-        if (!selectedPlugins.isEmpty() && !PLUGIN_SERVER_TYPES.contains(serverType)) {
+        if (!selectedPlugins.isEmpty() && !supportsPlugins(serverType, customContentSupport)) {
             throw new IllegalArgumentException("selectedPlugins require a Paper, Spigot, or Purpur server type");
         }
         if (!modpackId.isBlank() && !selectedMods.isEmpty()) {
             throw new IllegalArgumentException("modpackId and selectedMods cannot be planned in the same change");
         }
-        if (!modpackId.isBlank() && "vanilla".equals(serverType)) {
+        if (!modpackId.isBlank() && ("vanilla".equals(serverType)
+                || ("custom".equals(serverType) && !supportsMods(serverType, customContentSupport)))) {
             throw new IllegalArgumentException("modpackId requires a mod-capable or plugin-capable server type");
         }
         if ((!modpackId.isBlank() || !selectedMods.isEmpty()) && "none".equals(modSource)) {
             throw new IllegalArgumentException("modSource cannot be none when mods or a modpack are selected");
         }
+    }
+
+    private static void validateCustomRuntime(
+            String serverType,
+            String customServerKind,
+            String customServerImage,
+            String customServerJarUrl,
+            String customServerJarSha256,
+            String customServerJarName,
+            String customServerCommand,
+            String customContentSupport,
+            String customModLoader) {
+        if (!"custom".equals(serverType)) {
+            if (!customServerKind.isBlank()
+                    || !customServerImage.isBlank()
+                    || !customServerJarUrl.isBlank()
+                    || !customServerJarSha256.isBlank()
+                    || !customServerCommand.isBlank()
+                    || !"none".equals(customContentSupport)
+                    || !"none".equals(customModLoader)) {
+                throw new IllegalArgumentException("custom server runtime fields require serverType=custom");
+            }
+            return;
+        }
+        if (customServerImage.isBlank() && customServerJarUrl.isBlank()) {
+            throw new IllegalArgumentException("serverType=custom requires customServerImage or customServerJarUrl");
+        }
+        if (!customServerJarUrl.isBlank() && customServerJarSha256.isBlank()) {
+            throw new IllegalArgumentException("customServerJarSha256 is required when customServerJarUrl is set");
+        }
+        if ("none".equals(customContentSupport) && !"none".equals(customModLoader)) {
+            throw new IllegalArgumentException("customModLoader must be none when customContentSupport=none");
+        }
+        if (!customServerJarUrl.isBlank()
+                && !customServerCommand.isBlank()
+                && !customServerCommand.contains(customServerJarName)) {
+            throw new IllegalArgumentException("customServerCommand must reference customServerJarName");
+        }
+    }
+
+    private static boolean supportsMods(String serverType, String customContentSupport) {
+        return MOD_SERVER_TYPES.contains(serverType)
+                || ("custom".equals(serverType) && ("mods".equals(customContentSupport)
+                || "mods-and-plugins".equals(customContentSupport)));
+    }
+
+    private static boolean supportsPlugins(String serverType, String customContentSupport) {
+        return PLUGIN_SERVER_TYPES.contains(serverType)
+                || ("custom".equals(serverType) && ("plugins".equals(customContentSupport)
+                || "mods-and-plugins".equals(customContentSupport)));
     }
 
     private static List<String> tokenList(String value, String name) {
@@ -711,6 +841,81 @@ public final class MinecraftServerProvider implements ResourceProvider {
         return value;
     }
 
+    private static String safeToken(String value, String name) {
+        String text = safeText(value, name, 128);
+        if (!RESOURCE_TOKEN.matcher(text).matches()) {
+            throw new IllegalArgumentException(name + " must be a safe token");
+        }
+        return text;
+    }
+
+    private static String safeImageReference(String value, String name) {
+        String text = safeText(value, name, 256);
+        if (text.isBlank()) {
+            return "";
+        }
+        if (!IMAGE_REFERENCE.matcher(text).matches() || text.contains("..")) {
+            throw new IllegalArgumentException(name + " must be a safe container image reference");
+        }
+        return text;
+    }
+
+    private static String safeArtifactUrl(String value, String name) {
+        String text = safeText(value, name, 600);
+        if (text.isBlank()) {
+            return "";
+        }
+        try {
+            URI uri = new URI(text);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            if (!Set.of("https", "http").contains(scheme) || uri.getHost() == null || uri.getHost().isBlank()) {
+                throw new IllegalArgumentException(name + " must be an http(s) URL with a host");
+            }
+            if (!uri.getPath().toLowerCase(Locale.ROOT).endsWith(".jar")) {
+                throw new IllegalArgumentException(name + " must point to a .jar artifact");
+            }
+            return uri.toString();
+        } catch (URISyntaxException error) {
+            throw new IllegalArgumentException(name + " must be a valid URI", error);
+        }
+    }
+
+    private static String safeSha256(String value, String name) {
+        String text = safeText(value, name, 64).toLowerCase(Locale.ROOT);
+        if (text.isBlank()) {
+            return "";
+        }
+        if (!SHA256.matcher(text).matches()) {
+            throw new IllegalArgumentException(name + " must be a 64-character SHA-256 digest");
+        }
+        return text;
+    }
+
+    private static String safeJarName(String value, String name) {
+        String text = safeText(value, name, 128);
+        if (!SAFE_FILE_NAME.matcher(text).matches() || !text.toLowerCase(Locale.ROOT).endsWith(".jar")) {
+            throw new IllegalArgumentException(name + " must be a safe .jar file name");
+        }
+        return text;
+    }
+
+    private static String safeCommand(String value, String name) {
+        String text = safeText(value, name, 1_200).trim();
+        if (text.isBlank()) {
+            return "";
+        }
+        if (text.contains(";")
+                || text.contains("&&")
+                || text.contains("||")
+                || text.contains("`")
+                || text.contains("$(")
+                || text.contains("<")
+                || text.contains(">")) {
+            throw new IllegalArgumentException(name + " contains unsupported shell control operators");
+        }
+        return text;
+    }
+
     private static String defaultModSource(String modpackId, List<String> selectedMods) {
         return modpackId.isBlank() && selectedMods.isEmpty() ? "none" : "modrinth";
     }
@@ -739,11 +944,44 @@ public final class MinecraftServerProvider implements ResourceProvider {
         return minecraftVersion.startsWith("1.16") || minecraftVersion.startsWith("1.17") ? "17" : "21";
     }
 
-    private static String modLoader(String serverType) {
+    private static String customRuntimeSource(String serverType, String customServerImage, String customServerJarUrl) {
+        if (!"custom".equals(serverType)) {
+            return "daisycloud-managed-image";
+        }
+        if (!customServerImage.isBlank() && !customServerJarUrl.isBlank()) {
+            return "custom-image-and-jar";
+        }
+        if (!customServerImage.isBlank()) {
+            return "custom-image";
+        }
+        return "custom-jar";
+    }
+
+    private static String serverImage(
+            String serverType,
+            String minecraftVersion,
+            String javaVersion,
+            String customServerImage) {
+        if ("custom".equals(serverType) && !customServerImage.isBlank()) {
+            return customServerImage;
+        }
+        if ("custom".equals(serverType)) {
+            return "daisycloud/minecraft-custom-java:" + javaVersion;
+        }
+        return "daisycloud/minecraft-" + serverType + ":" + minecraftVersion;
+    }
+
+    private static String modLoader(String serverType, String customModLoader, String customContentSupport) {
+        if ("custom".equals(serverType)) {
+            return customContentSupport.contains("mods") ? customModLoader : "none";
+        }
         return MOD_SERVER_TYPES.contains(serverType) ? serverType : "none";
     }
 
-    private static String resourceRecommendation(String modpackId, List<String> selectedMods) {
+    private static String resourceRecommendation(String serverType, String modpackId, List<String> selectedMods) {
+        if ("custom".equals(serverType)) {
+            return "custom server baseline; validate jar/image trust, memory profile, and startup command before exposing publicly";
+        }
         if (!modpackId.isBlank()) {
             return "8GB RAM baseline; raise to 12GB+ for large expert packs or 20+ active players";
         }
